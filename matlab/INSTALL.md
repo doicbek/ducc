@@ -1,209 +1,157 @@
-# DUCC0 MATLAB Wrapper Installation Guide
+# DUCC0 MATLAB MEX Interface - Installation Guide
+
+This guide explains how to install and build the DUCC0 MATLAB MEX interface.
 
 ## Prerequisites
 
+### Required Software
+
 1. **MATLAB** (R2018b or later)
-   - Must have Python interface support
-   - Check with: `pyversion`
+   - Download from: https://www.mathworks.com/products/matlab.html
+   - Ensure MATLAB is in your PATH or set `MATLAB_ROOT` environment variable
 
-2. **Python** (3.8 or later)
-   - Verify installation: `python --version`
-   - Ensure Python is accessible from MATLAB
+2. **C++ Compiler** (C++17 compatible)
+   - **Windows**: Visual Studio 2019 or later, or MinGW-w64
+   - **Linux**: GCC 7+ or Clang 6+
+   - **Mac**: Xcode Command Line Tools (Clang)
 
-3. **ducc0 Python Package**
-   - Install via pip: `pip install ducc0`
-   - Or from source: `pip install --no-binary ducc0 ducc0`
+3. **CMake** (3.15 or later, optional but recommended)
+   - Download from: https://cmake.org/download/
+   - Or use package manager: `apt install cmake` (Linux), `brew install cmake` (Mac)
 
-## Installation Steps
+### Optional Software
 
-### Step 1: Install ducc0 Python Package
+- **Git** (for cloning the repository)
+- **Make** or **Ninja** (for building)
 
-**Option A: Install Pre-compiled Binary (Recommended for Quick Setup)**
-```bash
-pip install ducc0
-```
+## Installation Methods
 
-**Option B: Install from Source (Recommended for Best Performance)**
-```bash
-pip install --no-binary ducc0 --user ducc0
-```
+### Method 1: Build with CMake (Recommended)
 
-Note: Compilation from source requires a C++17 compiler and can take several minutes.
-
-### Step 2: Configure MATLAB Python Interface
-
-1. Start MATLAB
-
-2. Check current Python configuration:
-   ```matlab
-   pyversion
+1. **Clone the repository** (if not already done):
+   ```bash
+   git clone https://gitlab.mpcdf.mpg.de/mtr/ducc.git
+   cd ducc/matlab/mex
    ```
 
-3. If Python is not configured or wrong version, set it:
-   ```matlab
-   % On Linux/Mac:
-   pyversion('/usr/bin/python3')
-   
-   % On Windows:
-   pyversion('C:\Python39\python.exe')
-   
-   % Or let MATLAB find it automatically:
-   pyversion  % Shows available Python versions
+2. **Create build directory**:
+   ```bash
+   mkdir build
+   cd build
    ```
 
-4. Verify ducc0 can be imported:
-   ```matlab
-   try
-       py.importlib.import_module('ducc0');
-       fprintf('ducc0 module found successfully!\n');
-   catch ME
-       fprintf('Error: %s\n', ME.message);
-       fprintf('Please install ducc0: pip install ducc0\n');
-   end
+3. **Configure with CMake**:
+   ```bash
+   cmake ..
    ```
 
-### Step 3: Add MATLAB Wrapper to Path
+   If MATLAB is not found automatically, specify the path:
+   ```bash
+   cmake -DMATLAB_ROOT=/path/to/matlab ..
+   ```
 
-**Option A: Add to MATLAB Path Permanently**
+   Or set the environment variable:
+   ```bash
+   export MATLAB_ROOT=/path/to/matlab
+   cmake ..
+   ```
 
-1. In MATLAB, go to: Home → Set Path
-2. Click "Add Folder..."
-3. Navigate to and select the `matlab` directory in the DUCC repository
-4. Click "Save"
+4. **Build**:
+   ```bash
+   cmake --build .
+   ```
 
-**Option B: Add to Path in Script/Session**
+   Or use make:
+   ```bash
+   make
+   ```
 
-Add this line to your MATLAB startup script or run it at the beginning of each session:
+5. **Install** (optional):
+   ```bash
+   cmake --install .
+   ```
+
+### Method 2: Build Manually
+
+See `mex/INSTALL.md` for detailed manual build instructions.
+
+## Configuration
+
+### Setting MATLAB Path
+
+After building, add the MEX directory to your MATLAB path:
+
 ```matlab
-addpath('/path/to/ducc/matlab')
+% Add MEX directory
+addpath('/path/to/ducc/matlab/mex/build');
+
+% Add MATLAB wrapper directory
+addpath('/path/to/ducc/matlab');
 ```
 
-**Option C: Use as Package (Recommended)**
+Or add permanently to your `startup.m`:
 
-If you want to use the package structure, add the parent directory:
 ```matlab
-addpath('/path/to/ducc')
+% Add to startup.m
+addpath('/path/to/ducc/matlab/mex/build');
+addpath('/path/to/ducc/matlab');
 ```
 
-Then use: `import ducc0.*`
+### Configuring MEX Compiler
 
-### Step 4: Verify Installation
+If MEX compiler is not configured:
 
-Run this test script:
-```matlab
-% Test basic functionality
-try
-    import ducc0.*
-    
-    % Test FFT
-    x = randn(64, 64) + 1i*randn(64, 64);
-    y = ducc0.fft.c2c(x);
-    fprintf('FFT test passed!\n');
-    
-    % Test SHT
-    lmax = 16;
-    nalm = (lmax+1)*(lmax+2)/2;
-    alm = randn(1, nalm) + 1i*randn(1, nalm);
-    map = ducc0.sht.synthesis_2d(alm, lmax, 'ntheta', 17, 'nphi', 34);
-    fprintf('SHT test passed!\n');
-    
-    fprintf('\nInstallation successful!\n');
-catch ME
-    fprintf('Error during test: %s\n', ME.message);
-    fprintf('Stack trace:\n');
-    for i = 1:length(ME.stack)
-        fprintf('  %s at line %d\n', ME.stack(i).file, ME.stack(i).line);
-    end
-end
-```
+1. **Run MATLAB**:
+   ```matlab
+   mex -setup
+   ```
+
+2. **Select C++ compiler**:
+   - Choose from available compilers
+   - Follow on-screen instructions
+
+## Verification
+
+### Test Installation
+
+1. **Start MATLAB**:
+   ```matlab
+   matlab
+   ```
+
+2. **Test FFT function**:
+   ```matlab
+   % Test basic FFT
+   x = randn(64, 64) + 1i*randn(64, 64);
+   y = ducc0.fft.c2c(x);
+   z = ducc0.fft.c2c(y, 'forward', false, 'inorm', 2);
+   fprintf('Error: %e\n', max(abs(x(:) - z(:))));
+   ```
+
+3. **Test good_size function**:
+   ```matlab
+   n = 1000;
+   n_good = ducc0.fft.good_size(n);
+   fprintf('Good size for %d: %d\n', n, n_good);
+   ```
+
+### Expected Output
+
+- FFT test should show error < 1e-10 (numerical precision)
+- good_size should return a value >= input value
 
 ## Troubleshooting
 
-### Issue: "Python module 'ducc0' not found"
-
-**Solution:**
-1. Verify Python installation:
-   ```matlab
-   pyversion
-   ```
-
-2. Install ducc0 in the Python environment MATLAB is using:
-   ```bash
-   # Use the Python executable that MATLAB sees
-   /path/to/python -m pip install ducc0
-   ```
-
-3. Restart MATLAB after installation
-
-### Issue: "Array conversion errors"
-
-**Solution:**
-- Ensure arrays are numeric (not cell arrays or structures)
-- Convert to appropriate type:
-  ```matlab
-  x = double(x);  % For real arrays
-  x = complex(x);  % For complex arrays
-  ```
-
-### Issue: "Wrong Python version"
-
-**Solution:**
-1. Check available Python versions:
-   ```matlab
-   pyversion
-   ```
-
-2. Set correct version:
-   ```matlab
-   pyversion('/path/to/correct/python')
-   ```
-
-3. Restart MATLAB
-
-### Issue: "Performance is slow"
-
-**Solution:**
-1. Install ducc0 from source with optimizations:
-   ```bash
-   pip install --no-binary ducc0 --user ducc0
-   ```
-
-2. Use multi-threading:
-   ```matlab
-   result = ducc0.fft.c2c(x, 'nthreads', 4);
-   ```
-
-3. Pre-allocate output arrays when possible
-
-## Platform-Specific Notes
-
-### Windows
-- Ensure Python is added to system PATH
-- May need to run MATLAB as administrator for path changes
-- Use forward slashes or double backslashes in paths: `'C:/Python39/python.exe'`
-
-### Linux/Mac
-- Python 3 is typically available as `python3`
-- May need to install Python development headers:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install python3-dev
-  
-  # Mac (with Homebrew)
-  brew install python3
-  ```
+See `mex/INSTALL.md` for detailed troubleshooting information.
 
 ## Next Steps
 
-After successful installation:
-1. Read the main README.md for usage examples
-2. Explore the module documentation: `help ducc0.fft.c2c`
-3. Check out the DUCC Python documentation: https://mtr.pages.mpcdf.de/ducc
+- See `mex/README.md` for usage examples
+- See `EXAMPLES.md` for more examples
+- Check DUCC C++ documentation: https://mtr.pages.mpcdf.de/ducc/cpp
 
-## Getting Help
+## Support
 
-- Check the main README.md for usage examples
-- Review DUCC Python documentation
-- Check MATLAB's Python interface documentation: `doc pyversion`
-- For DUCC-specific issues, refer to the main DUCC repository
-
+- Check `mex/README.md` for common issues
+- Report issues on the DUCC GitLab repository
+- Consult DUCC documentation: https://mtr.pages.mpcdf.de/ducc

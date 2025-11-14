@@ -16,11 +16,20 @@ function err = l2error(a, b)
 %   err : double
 %       L2 error between the arrays
 
-    py_a = ducc0.util.matlab2numpy(a);
-    py_b = ducc0.util.matlab2numpy(b);
+    % Simple MATLAB implementation (no MEX needed for this simple function)
+    if nargin < 2
+        error('DUCC0:InvalidInput', 'Both a and b are required');
+    end
     
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.misc.l2error(py_a, py_b);
-    err = double(py_result);
+    if ~isnumeric(a) || ~isnumeric(b)
+        error('DUCC0:InvalidInput', 'Inputs must be numeric arrays');
+    end
+    
+    if ~isequal(size(a), size(b))
+        error('DUCC0:InvalidInput', 'Inputs must have the same size');
+    end
+    
+    % Compute L2 error
+    diff = a(:) - b(:);
+    err = sqrt(sum(abs(diff).^2));
 end
-

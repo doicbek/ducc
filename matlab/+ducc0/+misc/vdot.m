@@ -19,17 +19,9 @@ function result = vdot(a, b)
 %   -----
 %   Accumulation is performed in long double precision for good accuracy.
 
-    py_a = ducc0.util.matlab2numpy(a);
-    py_b = ducc0.util.matlab2numpy(b);
-    
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.misc.vdot(py_a, py_b);
-    
-    % Convert result (scalar)
-    if isa(py_result, 'py.complex')
-        result = complex(double(py_result.real), double(py_result.imag));
-    else
-        result = double(py_result);
-    end
-end
+    error('DUCC0:MEX:NotImplemented', ...
+        'vdot MEX function is not yet implemented. Use MATLAB''s dot() function as a workaround.');
 
+    % TODO: Implement MEX function for better accuracy with long double accumulation
+    % For now, users can use: result = sum(conj(a(:)) .* b(:));
+end

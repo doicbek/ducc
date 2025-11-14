@@ -9,20 +9,16 @@
 %
 %   See also: ducc0.fft, ducc0.sht, ducc0.nufft, ducc0.healpix, ducc0.misc
 
-function py_mod = ducc0()
-    %DUCC0 Get the Python ducc0 module
-    %   Returns the Python ducc0 module for direct access if needed
+function mod_info = ducc0()
+    %DUCC0 Get DUCC module information
+    %   Returns information about the DUCC MEX interface
     
-    persistent py_ducc0;
-    if isempty(py_ducc0)
-        try
-            py_ducc0 = py.importlib.import_module('ducc0');
-        catch ME
-            error('DUCC0:PythonModuleNotFound', ...
-                ['Failed to import ducc0 Python module. ' ...
-                 'Please ensure ducc0 is installed: pip install ducc0']);
-        end
+    persistent info;
+    if isempty(info)
+        info = struct();
+        info.version = '0.1.0';
+        info.interface = 'MEX';
+        info.description = 'DUCC MATLAB MEX Interface - Direct C++ access without Python';
     end
-    py_mod = py_ducc0;
+    mod_info = info;
 end
-

@@ -12,8 +12,22 @@ function nside = npix2nside(npix)
 %   nside : int
 %       HEALPix nside parameter
 
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.healpix.npix2nside(int32(npix));
-    nside = double(py_result);
+    % Simple MATLAB implementation (no MEX needed for this simple function)
+    if nargin < 1
+        error('DUCC0:InvalidInput', 'npix is required');
+    end
+    
+    if ~isnumeric(npix) || ~isscalar(npix) || npix < 12
+        error('DUCC0:InvalidInput', 'npix must be at least 12');
+    end
+    
+    nside_sq = double(npix) / 12;
+    nside = sqrt(nside_sq);
+    
+    % Check if it's a valid nside (should be integer, typically power of 2)
+    if abs(nside - round(nside)) > 1e-10
+        error('DUCC0:InvalidInput', 'npix is not a valid HEALPix pixel count');
+    end
+    
+    nside = round(nside);
 end
-

@@ -17,12 +17,8 @@ function weights = get_gridweights(geometry, ntheta)
 %   Note: These weights need to be divided by the number of pixels per ring
 %   to obtain actual quadrature weights for a particular map.
 
-    if nargin < 2
-        error('DUCC0:InvalidInput', 'Both geometry and ntheta are required');
-    end
-    
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.sht.get_gridweights(char(geometry), int32(ntheta));
-    weights = ducc0.util.numpy2matlab(py_result);
-end
+    error('DUCC0:MEX:NotImplemented', ...
+        'get_gridweights MEX function is not yet implemented.');
 
+    % TODO: Implement MEX function
+end

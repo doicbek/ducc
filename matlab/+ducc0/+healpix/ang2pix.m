@@ -19,22 +19,8 @@ function pix = ang2pix(nside, theta, phi, varargin)
 %   pix : int or int array
 %       Pixel index(ices)
 
-    p = inputParser;
-    addRequired(p, 'nside', @(x) isnumeric(x) && isscalar(x));
-    addRequired(p, 'theta', @(x) isnumeric(x));
-    addRequired(p, 'phi', @(x) isnumeric(x));
-    addParameter(p, 'nest', false, @islogical);
-    parse(p, nside, theta, phi, varargin{:});
-    
-    py_mod = ducc0.ducc0();
-    py_theta = ducc0.util.matlab2numpy(p.Results.theta);
-    py_phi = ducc0.util.matlab2numpy(p.Results.phi);
-    
-    kwargs = py.dict();
-    kwargs{'nest'} = p.Results.nest;
-    
-    py_result = py_mod.healpix.ang2pix(int32(p.Results.nside), py_theta, py_phi, pyargs(kwargs));
-    pix = ducc0.util.numpy2matlab(py_result);
-    pix = int64(pix);  % Pixel indices should be integers
-end
+    error('DUCC0:MEX:NotImplemented', ...
+        'ang2pix MEX function is not yet implemented.');
 
+    % TODO: Implement MEX function
+end

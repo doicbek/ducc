@@ -12,8 +12,14 @@ function npix = nside2npix(nside)
 %   npix : int
 %       Number of pixels = 12 * nside^2
 
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.healpix.nside2npix(int32(nside));
-    npix = double(py_result);
+    % Simple MATLAB implementation (no MEX needed for this simple function)
+    if nargin < 1
+        error('DUCC0:InvalidInput', 'nside is required');
+    end
+    
+    if ~isnumeric(nside) || ~isscalar(nside) || nside < 1
+        error('DUCC0:InvalidInput', 'nside must be a positive integer');
+    end
+    
+    npix = 12 * double(nside)^2;
 end
-

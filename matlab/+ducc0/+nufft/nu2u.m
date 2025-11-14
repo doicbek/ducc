@@ -31,45 +31,9 @@ function out = nu2u(points, coord, varargin)
 %   -------
 %   out : complex array
 %       Uniform grid values
-%
-%   See also: ducc0.nufft.u2nu, ducc0.nufft.nu2nu
 
-    p = inputParser;
-    addRequired(p, 'points', @(x) isnumeric(x));
-    addRequired(p, 'coord', @(x) isnumeric(x));
-    addParameter(p, 'forward', true, @islogical);
-    addParameter(p, 'epsilon', 1e-12, @(x) isnumeric(x) && isscalar(x));
-    addParameter(p, 'grid_shape', [], @(x) isnumeric(x) || isempty(x));
-    addParameter(p, 'periodicity', [], @(x) isnumeric(x) || isempty(x));
-    addParameter(p, 'fft_order', false, @islogical);
-    addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
-    addParameter(p, 'out', [], @(x) isnumeric(x) || isempty(x));
-    parse(p, points, coord, varargin{:});
-    
-    py_points = ducc0.util.matlab2numpy(p.Results.points);
-    py_coord = ducc0.util.matlab2numpy(p.Results.coord);
-    
-    kwargs = py.dict();
-    kwargs{'forward'} = p.Results.forward;
-    kwargs{'epsilon'} = double(p.Results.epsilon);
-    if ~isempty(p.Results.grid_shape)
-        kwargs{'grid_shape'} = py.list(int32(p.Results.grid_shape));
-    end
-    if ~isempty(p.Results.periodicity)
-        if isscalar(p.Results.periodicity)
-            kwargs{'periodicity'} = double(p.Results.periodicity);
-        else
-            kwargs{'periodicity'} = py.list(double(p.Results.periodicity));
-        end
-    end
-    kwargs{'fft_order'} = p.Results.fft_order;
-    kwargs{'nthreads'} = int32(p.Results.nthreads);
-    if ~isempty(p.Results.out)
-        kwargs{'out'} = ducc0.util.matlab2numpy(p.Results.out);
-    end
-    
-    py_mod = ducc0.ducc0();
-    py_result = py_mod.nufft.nu2u(py_points, py_coord, pyargs(kwargs));
-    out = ducc0.util.numpy2matlab(py_result);
+    error('DUCC0:MEX:NotImplemented', ...
+        'nu2u MEX function is not yet implemented.');
+
+    % TODO: Implement MEX function
 end
-
