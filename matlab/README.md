@@ -2,11 +2,33 @@
 
 This directory contains a MATLAB wrapper for the DUCC (Distinctly Useful Code Collection) library, providing access to efficient algorithms for Fast Fourier Transforms, Spherical Harmonic Transforms, non-uniform FFTs, and other numerical computation tools.
 
+## Two Interface Options
+
+This wrapper provides **two ways** to access DUCC:
+
+1. **Python Interface** (Default): Uses MATLAB's Python interface to call the ducc0 Python package
+   - Easy to set up (just install Python package)
+   - Full API coverage
+   - Some overhead from Python interface
+
+2. **MEX Interface** (Recommended for Performance): Direct C++ access via MEX files
+   - Better performance (no Python overhead)
+   - No Python dependency
+   - Requires compilation
+   - See `README_MEX.md` for details
+
 ## Requirements
 
+### For Python Interface:
 - MATLAB R2018b or later (with Python interface support)
 - Python 3.8 or later
 - ducc0 Python package installed: `pip install ducc0`
+
+### For MEX Interface:
+- MATLAB R2018b or later
+- C++17 compatible compiler (GCC 7+, Clang, or MSVC 2019+)
+- DUCC0 source code
+- See `mex/BUILD.md` for build instructions
 
 ## Installation
 
@@ -28,6 +50,8 @@ This directory contains a MATLAB wrapper for the DUCC (Distinctly Useful Code Co
 
 ## Quick Start
 
+### Using Python Interface (Default)
+
 ```matlab
 % Import the module
 import ducc0.*
@@ -46,6 +70,16 @@ lmax = 32;
 alm = randn(1, (lmax+1)*(lmax+2)/2) + 1i*randn(1, (lmax+1)*(lmax+2)/2);
 map = ducc0.sht.synthesis_2d(alm, lmax, 'ntheta', 33, 'nphi', 66);
 alm2 = ducc0.sht.analysis_2d(map, lmax);
+```
+
+### Using MEX Interface (Better Performance)
+
+```matlab
+% Build MEX files first (see mex/BUILD.md)
+% Then use _mex versions of functions:
+
+x = randn(128, 128) + 1i*randn(128, 128);
+y = ducc0.fft.c2c_mex(x, 'nthreads', 4);  % Direct C++ access
 ```
 
 ## Module Overview
