@@ -2,6 +2,7 @@ function [theta, phi] = pix2ang(nside, pix, varargin)
 %PIX2ANG Convert HEALPix pixel index to angular coordinates
 %   [THETA, PHI] = PIX2ANG(NSIDE, PIX) converts pixel index to (theta, phi).
 %   [THETA, PHI] = PIX2ANG(NSIDE, PIX, 'nest', true) uses NESTED ordering.
+%   [THETA, PHI] = PIX2ANG(NSIDE, PIX, 'nthreads', N) uses N threads (default: 0 = auto).
 %
 %   Parameters
 %   ----------
@@ -11,6 +12,8 @@ function [theta, phi] = pix2ang(nside, pix, varargin)
 %       Pixel index(ices)
 %   nest : bool, optional
 %       Use NESTED ordering instead of RING (default: false)
+%   nthreads : int, optional
+%       Number of threads to use (default: 0 = auto)
 %
 %   Returns
 %   -------
@@ -19,8 +22,13 @@ function [theta, phi] = pix2ang(nside, pix, varargin)
 %   phi : double or double array
 %       Azimuth in radians (0 to 2*pi)
 
-    error('DUCC0:MEX:NotImplemented', ...
-        'pix2ang MEX function is not yet implemented.');
-
-    % TODO: Implement MEX function
+    p = inputParser;
+    addRequired(p, 'nside', @(x) isnumeric(x) && isscalar(x));
+    addRequired(p, 'pix', @(x) isnumeric(x));
+    addParameter(p, 'nest', false, @(x) islogical(x) || isnumeric(x));
+    addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
+    parse(p, nside, pix, varargin{:});
+    
+    [theta, phi] = ducc0_healpix_pix2ang_mex(double(p.Results.nside), double(p.Results.pix), ...
+        logical(p.Results.nest), double(p.Results.nthreads));
 end

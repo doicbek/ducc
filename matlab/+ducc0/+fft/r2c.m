@@ -33,25 +33,21 @@ function out = r2c(a, varargin)
 %
 %   See also: ducc0.fft.c2c, ducc0.fft.c2r
 
-    error('DUCC0:MEX:NotImplemented', ...
-        'r2c MEX function is not yet implemented. Use ducc0.fft.c2c for complex arrays.');
-
-    % TODO: Implement MEX function
-    % p = inputParser;
-    % addRequired(p, 'a', @(x) isnumeric(x) && isreal(x));
-    % addParameter(p, 'axes', [], @(x) isnumeric(x) || isempty(x));
-    % addParameter(p, 'forward', true, @(x) islogical(x) || isnumeric(x));
-    % addParameter(p, 'inorm', 0, @(x) isnumeric(x) && isscalar(x));
-    % addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
-    % parse(p, a, varargin{:});
-    % 
-    % % Prepare axes (1-based MATLAB convention)
-    % axes = [];
-    % if ~isempty(p.Results.axes)
-    %     axes = double(p.Results.axes(:)');  % Row vector, 1-based
-    % end
-    % 
-    % % Call MEX function
-    % out = ducc0_fft_r2c_mex(a, axes, logical(p.Results.forward), ...
-    %     p.Results.inorm, p.Results.nthreads);
+    p = inputParser;
+    addRequired(p, 'a', @(x) isnumeric(x) && isreal(x));
+    addParameter(p, 'axes', [], @(x) isnumeric(x) || isempty(x));
+    addParameter(p, 'forward', true, @(x) islogical(x) || isnumeric(x));
+    addParameter(p, 'inorm', 0, @(x) isnumeric(x) && isscalar(x));
+    addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
+    parse(p, a, varargin{:});
+    
+    % Prepare axes (1-based MATLAB convention)
+    axes = [];
+    if ~isempty(p.Results.axes)
+        axes = double(p.Results.axes(:)');  % Row vector, 1-based
+    end
+    
+    % Call MEX function
+    out = ducc0_fft_r2c_mex(a, axes, logical(p.Results.forward), ...
+        p.Results.inorm, p.Results.nthreads);
 end

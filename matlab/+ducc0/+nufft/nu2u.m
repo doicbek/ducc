@@ -33,7 +33,7 @@ function out = nu2u(points, coord, varargin)
 %       Uniform grid values
 
     error('DUCC0:MEX:NotImplemented', ...
-        'nu2u MEX function is not yet implemented.');
-
-    % TODO: Implement MEX function
+        'nu2u MEX function is not yet fully implemented. Complex array conversion required.');
+    
+    % TODO: Complete MEX function implementation
 end

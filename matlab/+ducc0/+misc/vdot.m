@@ -19,9 +19,13 @@ function result = vdot(a, b)
 %   -----
 %   Accumulation is performed in long double precision for good accuracy.
 
-    error('DUCC0:MEX:NotImplemented', ...
-        'vdot MEX function is not yet implemented. Use MATLAB''s dot() function as a workaround.');
-
-    % TODO: Implement MEX function for better accuracy with long double accumulation
-    % For now, users can use: result = sum(conj(a(:)) .* b(:));
+    if ~isnumeric(a) || ~isnumeric(b)
+        error('DUCC0:Misc:VDOT:InputError', 'a and b must be numeric');
+    end
+    
+    if ~isequal(size(a), size(b))
+        error('DUCC0:Misc:VDOT:InputError', 'a and b must have the same shape');
+    end
+    
+    result = ducc0_misc_vdot_mex(a, b);
 end

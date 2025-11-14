@@ -177,48 +177,44 @@ fprintf('Total weight: %f (should be ~4*pi = %f)\n', ...
 
 ## Non-uniform FFTs
 
-### 1D Non-uniform FFT
+### Uniform to Non-uniform FFT (u2nu)
 
 ```matlab
+% Generate uniform grid
+grid_size = 256;
+grid = randn(grid_size, 1) + 1i*randn(grid_size, 1);
+
+% Generate random non-uniform coordinates
+npoints = 1000;
+coord = (rand(npoints, 1) - 0.5) * 2*pi;  % Random coordinates in [-pi, pi]
+
+% Transform to non-uniform points
+points = ducc0.nufft.u2nu(grid, coord, ...
+    'epsilon', 1e-12, ...
+    'periodicity', 2*pi, ...
+    'nthreads', 4);
+
+fprintf('Points shape: [%d]\n', length(points));
+```
+
+### Non-uniform to Uniform FFT (nu2u)
+
+```matlab
+% Note: nu2u MEX function is not yet fully implemented
+% This example shows the expected usage once implemented
+
 % Generate random non-uniform points
 npoints = 1000;
 points = randn(npoints, 1) + 1i*randn(npoints, 1);
 coord = (rand(npoints, 1) - 0.5) * 2*pi;  % Random coordinates in [-pi, pi]
 
-% Transform to uniform grid
-grid_size = 256;
-grid = ducc0.nufft.nu2u(points, coord, ...
-    'grid_shape', [grid_size], ...
-    'epsilon', 1e-12, ...
-    'periodicity', 2*pi, ...
-    'nthreads', 4);
-
-% Transform back
-points2 = ducc0.nufft.u2nu(grid, coord, ...
-    'epsilon', 1e-12, ...
-    'periodicity', 2*pi);
-
-% Check error
-error = ducc0.misc.l2error(points, points2);
-fprintf('NUFFT round-trip error: %e\n', error);
-```
-
-### 2D Non-uniform FFT
-
-```matlab
-% 2D coordinates
-npoints = 500;
-points = randn(npoints, 1) + 1i*randn(npoints, 1);
-coord = (rand(npoints, 2) - 0.5) * 2*pi;  % 2D coordinates
-
-% Transform to uniform grid
-grid_shape = [128, 128];
-grid = ducc0.nufft.nu2u(points, coord, ...
-    'grid_shape', grid_shape, ...
-    'epsilon', 1e-10, ...
-    'periodicity', [2*pi, 2*pi]);
-
-fprintf('Grid shape: [%d, %d]\n', size(grid));
+% Transform to uniform grid (when implemented)
+% grid_size = 256;
+% grid = ducc0.nufft.nu2u(points, coord, ...
+%     'grid_shape', [grid_size], ...
+%     'epsilon', 1e-12, ...
+%     'periodicity', 2*pi, ...
+%     'nthreads', 4);
 ```
 
 ## HEALPix Operations
@@ -307,7 +303,8 @@ fprintf('Complex scalar product: %f%+.6fi\n', real(dot_product), imag(dot_produc
 a = randn(128, 128);
 b = a + 1e-10 * randn(128, 128);  % Add small noise
 
-error = ducc0.misc.l2error(a, b);
+% Compute L2 error manually
+error = sqrt(sum(abs(a(:) - b(:)).^2));
 fprintf('L2 error: %e\n', error);
 ```
 
@@ -348,7 +345,7 @@ function test_roundtrip(func_forward, func_inverse, data, varargin)
     % Test that forward then inverse gives original data
     forward_result = func_forward(data, varargin{:});
     inverse_result = func_inverse(forward_result, varargin{:});
-    error = ducc0.misc.l2error(data, inverse_result);
+    error = max(abs(data(:) - inverse_result(:)));
     fprintf('Round-trip error: %e\n', error);
 end
 

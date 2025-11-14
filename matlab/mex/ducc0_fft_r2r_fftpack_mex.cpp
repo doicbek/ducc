@@ -1,20 +1,21 @@
 /*
- * DUCC0 FFT R2C MEX Interface
+ * DUCC0 FFT R2R FFTPACK MEX Interface
  * 
- * MATLAB MEX gateway for real-to-complex FFT
+ * MATLAB MEX gateway for real-to-real FFT using FFTPACK conventions
  * 
  * Usage:
- *   out = ducc0_fft_r2c_mex(in, axes, forward, inorm, nthreads)
+ *   out = ducc0_fft_r2r_fftpack_mex(in, axes, real2hermitian, forward, inorm, nthreads)
  * 
  * Inputs:
  *   in: Real input array (double or single)
  *   axes: Axes to transform (optional, default: all axes)
+ *   real2hermitian: Real-to-Hermitian flag (optional, default: true)
  *   forward: Forward transform flag (optional, default: true)
  *   inorm: Normalization (0=none, 1=1/sqrt(N), 2=1/N) (optional, default: 0)
  *   nthreads: Number of threads (optional, default: 0 = auto)
  * 
  * Output:
- *   out: Complex output array (same shape except last axis is n//2+1)
+ *   out: Real output array (same shape as input)
  */
 
 #include "mex.h"
@@ -22,7 +23,6 @@
 #include "ducc0/fft/fft.h"
 #include "ducc0/infra/error_handling.h"
 #include <vector>
-#include <complex>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -65,7 +65,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     try {
         // Check inputs
         if (nrhs < 1) {
-            mexErrMsgIdAndTxt("DUCC0:FFT:R2C:InputError", 
+            mexErrMsgIdAndTxt("DUCC0:FFT:R2RFFTPACK:InputError", 
                 "At least one input (array) required");
         }
         
@@ -76,15 +76,16 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
         
         if (mxIsComplex(in_arr)) {
-            mexErrMsgIdAndTxt("DUCC0:FFT:R2C:InputError", 
-                "Input must be real for r2c");
+            mexErrMsgIdAndTxt("DUCC0:FFT:R2RFFTPACK:InputError", 
+                "Input must be real for r2r_fftpack");
         }
         
         // Parse optional parameters
         const mxArray *axes_arr = (nrhs > 1) ? prhs[1] : nullptr;
-        bool forward = getOptionalParam<bool>(nrhs > 2 ? prhs[2] : nullptr, true);
-        int inorm = getOptionalParam<int>(nrhs > 3 ? prhs[3] : nullptr, 0);
-        size_t nthreads = getOptionalParam<size_t>(nrhs > 4 ? prhs[4] : nullptr, 0);
+        bool real2hermitian = getOptionalParam<bool>(nrhs > 2 ? prhs[2] : nullptr, true);
+        bool forward = getOptionalParam<bool>(nrhs > 3 ? prhs[3] : nullptr, true);
+        int inorm = getOptionalParam<int>(nrhs > 4 ? prhs[4] : nullptr, 0);
+        size_t nthreads = getOptionalParam<size_t>(nrhs > 5 ? prhs[5] : nullptr, 0);
         
         // Get input dimensions and convert to row-major
         mwSize ndim = mxGetNumberOfDimensions(in_arr);
@@ -97,83 +98,66 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         // Determine data type
         mxClassID class_id = mxGetClassID(in_arr);
         
-        // Output shape: same as input except last axis in axes is n//2+1
-        vector<size_t> out_shape_ducc = shape_ducc;
-        size_t last_axis = axes.back();
-        out_shape_ducc[last_axis] = (shape_ducc[last_axis] / 2) + 1;
-        
-        // Convert output shape to MATLAB dimensions
-        mwSize out_ndim = out_shape_ducc.size();
-        mwSize *out_dims = new mwSize[out_ndim];
-        vectorDimsToMatlab(out_shape_ducc, out_dims);
-        
-        // Create output array (complex)
-        mxArray *out_arr = mxCreateNumericArray(out_ndim, out_dims, class_id, mxCOMPLEX);
-        delete[] out_dims;
+        // Create output array (same shape and type as input)
+        mxArray *out_arr = mxCreateNumericArray(ndim, dims, class_id, mxREAL);
         
         // Process based on data type
         if (class_id == mxDOUBLE_CLASS) {
-            // Real double input -> complex double output
+            // Real double input -> real double output
             vector<double> in_buffer;
-            vector<complex<double>> out_buffer;
+            vector<double> out_buffer;
             
-            size_t in_nelem = 1;
-            for (size_t s : shape_ducc) in_nelem *= s;
+            size_t nelem = 1;
+            for (size_t s : shape_ducc) nelem *= s;
             
-            size_t out_nelem = 1;
-            for (size_t s : out_shape_ducc) out_nelem *= s;
-            
-            in_buffer.resize(in_nelem);
-            out_buffer.resize(out_nelem);
+            in_buffer.resize(nelem);
+            out_buffer.resize(nelem);
             
             // Copy input from MATLAB to buffer
             copyMatlabToBuffer<double>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
             cmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<complex<double>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            vmav<double> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             double fct = computeNormFactor<double>(inorm, shape_ducc, axes);
             
-            // Perform r2c FFT
-            r2c(in_view, out_view, axes, forward, fct, nthreads);
+            // Perform r2r_fftpack FFT
+            r2r_fftpack(in_view, out_view, axes, real2hermitian, forward, fct, nthreads);
             
             // Copy output from buffer to MATLAB
-            copyBufferToMatlab<complex<double>>(out_buffer.data(), out_arr, out_shape_ducc);
+            copyBufferToMatlab<double>(out_buffer.data(), out_arr, shape_ducc);
             
         } else if (class_id == mxSINGLE_CLASS) {
-            // Real single input -> complex single output
+            // Real single input -> real single output
             vector<float> in_buffer;
-            vector<complex<float>> out_buffer;
+            vector<float> out_buffer;
             
-            size_t in_nelem = 1;
-            for (size_t s : shape_ducc) in_nelem *= s;
+            size_t nelem = 1;
+            for (size_t s : shape_ducc) nelem *= s;
             
-            size_t out_nelem = 1;
-            for (size_t s : out_shape_ducc) out_nelem *= s;
-            
-            in_buffer.resize(in_nelem);
-            out_buffer.resize(out_nelem);
+            in_buffer.resize(nelem);
+            out_buffer.resize(nelem);
             
             // Copy input from MATLAB to buffer
             copyMatlabToBuffer<float>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
             cmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<complex<float>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            vmav<float> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             float fct = computeNormFactor<float>(inorm, shape_ducc, axes);
             
-            // Perform r2c FFT
-            r2c(in_view, out_view, axes, forward, fct, nthreads);
+            // Perform r2r_fftpack FFT
+            r2r_fftpack(in_view, out_view, axes, real2hermitian, forward, fct, nthreads);
             
             // Copy output from buffer to MATLAB
-            copyBufferToMatlab<complex<float>>(out_buffer.data(), out_arr, out_shape_ducc);
+            copyBufferToMatlab<float>(out_buffer.data(), out_arr, shape_ducc);
             
         } else {
-            mexErrMsgIdAndTxt("DUCC0:FFT:R2C:TypeError", 
+            mexErrMsgIdAndTxt("DUCC0:FFT:R2RFFTPACK:TypeError", 
                 "Unsupported data type. Only double and single precision are supported.");
         }
         
@@ -183,3 +167,4 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         handleDuccError(e);
     }
 }
+
