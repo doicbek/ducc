@@ -34,11 +34,16 @@ This MATLAB MEX interface provides direct access to the DUCC C++ library from MA
 - [x] FFT c2c MEX function (complex-to-complex FFT)
 - [x] FFT good_size MEX function (find efficient FFT size)
 - [x] MATLAB wrapper functions for FFT module
+- [x] SHT synthesis_2d MEX function (spherical harmonic synthesis)
+- [x] SHT analysis_2d MEX function (spherical harmonic analysis)
+- [x] SHT get_gridweights MEX function (quadrature weights)
+- [x] MATLAB wrapper functions for SHT module
 - [x] Comprehensive documentation (README, INSTALL)
 - [x] CMake build system
 - [x] Array conversion (column-major to row-major)
 - [x] Complex array handling (interleaving/deinterleaving)
 - [x] Axis conversion (1-based to 0-based, column-major to row-major)
+- [x] SHT-specific array handling (1D/2D alm arrays, 3D map arrays)
 
 ### In Progress
 
@@ -49,11 +54,13 @@ This MATLAB MEX interface provides direct access to the DUCC C++ library from MA
 
 ### Planned
 
-- [ ] SHT MEX functions (synthesis_2d, analysis_2d, rotate_alm, get_gridweights)
+- [ ] SHT rotate_alm MEX function (rotate spherical harmonic coefficients)
+- [ ] SHT adjoint_synthesis_2d MEX function (adjoint synthesis)
+- [ ] SHT adjoint_analysis_2d MEX function (adjoint analysis)
 - [ ] NUFFT MEX functions (nu2u, u2nu)
 - [ ] HEALPix MEX functions (nside2npix, npix2nside, ang2pix, pix2ang)
 - [ ] Misc MEX functions (vdot, l2error)
-- [ ] Additional FFT functions (r2r_fftpack, dct, dst, hartley)
+- [ ] Additional FFT functions (r2c, c2r, r2r_fftpack, dct, dst, hartley)
 - [ ] Unit tests and validation
 - [ ] Performance benchmarks
 
@@ -93,6 +100,15 @@ z = ducc0.fft.c2c(y, 'forward', false, 'inorm', 2);
 % Good size
 n = 1000;
 n_good = ducc0.fft.good_size(n);
+
+% SHT example
+lmax = 64;
+alm = randn(1, ((lmax+1)*(lmax+2))/2) + 1i*randn(1, ((lmax+1)*(lmax+2))/2);
+map = ducc0.sht.synthesis_2d(alm, lmax, 'spin', 0, 'geometry', 'CC');
+alm2 = ducc0.sht.analysis_2d(map, lmax, 'spin', 0, 'geometry', 'CC');
+
+% Get grid weights
+weights = ducc0.sht.get_gridweights('CC', 64);
 ```
 
 ### Advanced Usage
@@ -168,6 +184,8 @@ assert(n_good >= n, 'good_size should return value >= input');
 
 - FFT round-trip error should be < 1e-10 (numerical precision)
 - good_size should return value >= input value
+- SHT round-trip error should be < 1e-10 (numerical precision)
+- get_gridweights should return positive weights
 - All functions should handle edge cases correctly
 
 ## Documentation

@@ -93,6 +93,15 @@ z = ducc0.fft.c2c(y, 'forward', false, 'inorm', 2);
 % Good size
 n = 1000;
 n_good = ducc0.fft.good_size(n);
+
+% SHT example
+lmax = 64;
+alm = randn(1, ((lmax+1)*(lmax+2))/2) + 1i*randn(1, ((lmax+1)*(lmax+2))/2);
+map = ducc0.sht.synthesis_2d(alm, lmax, 'spin', 0, 'geometry', 'CC');
+alm2 = ducc0.sht.analysis_2d(map, lmax, 'spin', 0, 'geometry', 'CC');
+
+% Get grid weights
+weights = ducc0.sht.get_gridweights('CC', 64);
 ```
 
 ## Architecture
@@ -129,12 +138,14 @@ MATLAB uses 1-based indexing and column-major axis ordering. DUCC uses 0-based i
 - `ducc0_fft_c2r_mex`: Complex-to-real FFT
 - `ducc0_fft_good_size_mex`: Find efficient FFT size
 
-### SHT Module (Coming Soon)
+### SHT Module
 
-- `ducc0_sht_synthesis_2d_mex`: Spherical harmonic synthesis
-- `ducc0_sht_analysis_2d_mex`: Spherical harmonic analysis
-- `ducc0_sht_rotate_alm_mex`: Rotate spherical harmonic coefficients
-- `ducc0_sht_get_gridweights_mex`: Get quadrature weights
+- `ducc0_sht_synthesis_2d_mex`: Spherical harmonic synthesis (alm2map) for 2D grids
+- `ducc0_sht_analysis_2d_mex`: Spherical harmonic analysis (map2alm) for 2D grids
+- `ducc0_sht_get_gridweights_mex`: Get quadrature weights for grid geometries
+- `ducc0_sht_rotate_alm_mex`: Rotate spherical harmonic coefficients (Coming Soon)
+- `ducc0_sht_adjoint_synthesis_2d_mex`: Adjoint synthesis (Coming Soon)
+- `ducc0_sht_adjoint_analysis_2d_mex`: Adjoint analysis (Coming Soon)
 
 ### NUFFT Module (Coming Soon)
 
@@ -160,7 +171,12 @@ MATLAB uses 1-based indexing and column-major axis ordering. DUCC uses 0-based i
 - [x] FFT good_size MEX function
 - [ ] FFT r2c MEX function
 - [ ] FFT c2r MEX function
-- [ ] SHT MEX functions
+- [x] SHT synthesis_2d MEX function
+- [x] SHT analysis_2d MEX function
+- [x] SHT get_gridweights MEX function
+- [ ] SHT rotate_alm MEX function
+- [ ] SHT adjoint_synthesis_2d MEX function
+- [ ] SHT adjoint_analysis_2d MEX function
 - [ ] NUFFT MEX functions
 - [ ] HEALPix MEX functions
 - [ ] Misc MEX functions

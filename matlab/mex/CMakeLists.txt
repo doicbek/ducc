@@ -84,6 +84,9 @@ set(DUCC_SOURCES
 set(MEX_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_fft_c2c_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_fft_good_size_mex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_synthesis_2d_mex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_analysis_2d_mex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_get_gridweights_mex.cpp
 )
 
 # Compiler flags

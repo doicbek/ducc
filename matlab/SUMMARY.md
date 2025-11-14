@@ -17,11 +17,11 @@ matlab/
 │   │   ├── r2r_fftpack.m % Real-to-real FFT (⚠️ pending)
 │   │   └── good_size.m  % Find efficient FFT size (✅ MEX)
 │   ├── +sht/            % Spherical Harmonic Transform module
-│   │   ├── synthesis_2d.m (⚠️ pending)
-│   │   ├── analysis_2d.m (⚠️ pending)
+│   │   ├── synthesis_2d.m (✅ MEX)
+│   │   ├── analysis_2d.m (✅ MEX)
 │   │   ├── adjoint_synthesis_2d.m (⚠️ pending)
 │   │   ├── adjoint_analysis_2d.m (⚠️ pending)
-│   │   └── get_gridweights.m (⚠️ pending)
+│   │   └── get_gridweights.m (✅ MEX)
 │   ├── +nufft/          % Non-uniform FFT module
 │   │   ├── nu2u.m       % Non-uniform to uniform (⚠️ pending)
 │   │   └── u2nu.m       % Uniform to non-uniform (⚠️ pending)
@@ -39,6 +39,9 @@ matlab/
 ├── mex/                 % MEX interface source files
 │   ├── ducc0_fft_c2c_mex.cpp (✅ implemented)
 │   ├── ducc0_fft_good_size_mex.cpp (✅ implemented)
+│   ├── ducc0_sht_synthesis_2d_mex.cpp (✅ implemented)
+│   ├── ducc0_sht_analysis_2d_mex.cpp (✅ implemented)
+│   ├── ducc0_sht_get_gridweights_mex.cpp (✅ implemented)
 │   ├── ducc0_mex_utils.h (✅ implemented)
 │   └── CMakeLists.txt (✅ build system)
 ├── README.md            % Main documentation
@@ -69,7 +72,7 @@ matlab/
 
 ### 4. Module Coverage
 - **FFT**: Complex FFT (✅), good_size (✅), others pending
-- **SHT**: All functions pending MEX implementation
+- **SHT**: synthesis_2d (✅), analysis_2d (✅), get_gridweights (✅), others pending
 - **NUFFT**: All functions pending MEX implementation
 - **HEALPix**: Simple functions (✅), others pending
 - **Misc**: l2error (✅), vdot pending
@@ -79,13 +82,16 @@ matlab/
 ### ✅ Implemented
 - FFT c2c (MEX)
 - FFT good_size (MEX)
+- SHT synthesis_2d (MEX)
+- SHT analysis_2d (MEX)
+- SHT get_gridweights (MEX)
 - HEALPix nside2npix (MATLAB)
 - HEALPix npix2nside (MATLAB)
 - Misc l2error (MATLAB)
 
 ### ⚠️ Pending MEX Implementation
 - FFT r2c, c2r, r2r_fftpack
-- SHT synthesis_2d, analysis_2d, get_gridweights, etc.
+- SHT rotate_alm, adjoint_synthesis_2d, adjoint_analysis_2d
 - NUFFT nu2u, u2nu
 - HEALPix ang2pix, pix2ang
 - Misc vdot

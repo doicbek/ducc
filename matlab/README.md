@@ -46,6 +46,13 @@ z = ducc0.fft.c2c(y, 'forward', false, 'inorm', 2);
 % Example: Good FFT size
 n = 1000;
 n_good = ducc0.fft.good_size(n);
+
+% Example: Spherical Harmonic Transform
+lmax = 64;
+alm = randn(1, ((lmax+1)*(lmax+2))/2) + 1i*randn(1, ((lmax+1)*(lmax+2))/2);
+map = ducc0.sht.synthesis_2d(alm, lmax, 'spin', 0, 'geometry', 'CC');
+alm2 = ducc0.sht.analysis_2d(map, lmax, 'spin', 0, 'geometry', 'CC');
+weights = ducc0.sht.get_gridweights('CC', 64);
 ```
 
 ## Module Overview
@@ -76,9 +83,18 @@ y = ducc0.fft.c2c(x, 'axes', [1, 2], 'nthreads', 4);
 Efficient spherical harmonic transforms for various grid geometries.
 
 **Main Functions:**
-- `synthesis_2d(alm, lmax, ...)` - Spherical harmonic synthesis (⚠️ not yet implemented)
-- `analysis_2d(map, lmax, ...)` - Spherical harmonic analysis (⚠️ not yet implemented)
-- `get_gridweights(geometry, ntheta)` - Get quadrature weights (⚠️ not yet implemented)
+- `synthesis_2d(alm, lmax, ...)` - Spherical harmonic synthesis (✅ implemented)
+- `analysis_2d(map, lmax, ...)` - Spherical harmonic analysis (✅ implemented)
+- `get_gridweights(geometry, ntheta)` - Get quadrature weights (✅ implemented)
+
+**Example:**
+```matlab
+lmax = 64;
+alm = randn(1, ((lmax+1)*(lmax+2))/2) + 1i*randn(1, ((lmax+1)*(lmax+2))/2);
+map = ducc0.sht.synthesis_2d(alm, lmax, 'spin', 0, 'geometry', 'CC');
+alm2 = ducc0.sht.analysis_2d(map, lmax, 'spin', 0, 'geometry', 'CC');
+weights = ducc0.sht.get_gridweights('CC', 64);
+```
 
 ### ducc0.nufft - Non-uniform FFTs
 
@@ -126,9 +142,18 @@ y = ducc0.fft.c2c(x, 'axes', [1, 2]);
 
 ## Implementation Status
 
-✅ **Implemented**: FFT c2c, FFT good_size, HEALPix nside2npix/npix2nside, misc l2error
+✅ **Implemented**: 
+- FFT: c2c, good_size
+- SHT: synthesis_2d, analysis_2d, get_gridweights
+- HEALPix: nside2npix, npix2nside (MATLAB implementation)
+- Misc: l2error (MATLAB implementation)
 
-⚠️ **Not Yet Implemented**: Most other functions show error messages indicating MEX implementation is pending
+⚠️ **Not Yet Implemented**: 
+- FFT: r2c, c2r, r2r_fftpack, dct, dst, hartley
+- SHT: rotate_alm, adjoint_synthesis_2d, adjoint_analysis_2d
+- NUFFT: nu2u, u2nu
+- HEALPix: ang2pix, pix2ang (MEX implementation)
+- Misc: vdot (MEX implementation)
 
 ## Performance Notes
 

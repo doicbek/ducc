@@ -34,12 +34,12 @@ fprintf('Reconstruction error: %e\n', max(abs(x(:) - z(:))));
 % Real input data
 x = randn(256, 256);
 
-% Forward transform
-y = ducc0.fft.r2c(x, 'axes', [0, 1]);
-
-% Note: output size is reduced along last axis
-fprintf('Input size: [%d, %d]\n', size(x));
-fprintf('Output size: [%d, %d]\n', size(y));
+% Forward transform (MEX not yet implemented, placeholder)
+% y = ducc0.fft.r2c(x, 'axes', [1, 2]);
+% 
+% % Note: output size is reduced along last axis
+% fprintf('Input size: [%d, %d]\n', size(x));
+% fprintf('Output size: [%d, %d]\n', size(y));
 ```
 
 ### Multi-threaded FFT
@@ -86,6 +86,7 @@ alm(1:lmax+1) = real(alm(1:lmax+1));
 
 % Synthesize map
 map = ducc0.sht.synthesis_2d(alm, lmax, ...
+    'spin', 0, ...
     'mmax', mmax, ...
     'ntheta', ntheta, ...
     'nphi', nphi, ...
@@ -93,11 +94,12 @@ map = ducc0.sht.synthesis_2d(alm, lmax, ...
 
 % Analyze back
 alm2 = ducc0.sht.analysis_2d(map, lmax, ...
+    'spin', 0, ...
     'mmax', mmax, ...
     'geometry', 'CC');
 
 % Check round-trip error
-error = ducc0.misc.l2error(alm, alm2);
+error = max(abs(alm(:) - alm2(:)));
 fprintf('Round-trip error: %e\n', error);
 ```
 
@@ -126,11 +128,12 @@ for i = 1:length(geometries)
     
     % Synthesize
     map = ducc0.sht.synthesis_2d(alm, lmax, ...
+        'spin', 0, ...
         'ntheta', ntheta, ...
         'nphi', 2*lmax+2, ...
         'geometry', geo);
     
-    fprintf('Geometry %s: map size [%d, %d]\n', geo, size(map));
+    fprintf('Geometry %s: map size [%d, %d, %d]\n', geo, size(map));
 end
 ```
 
