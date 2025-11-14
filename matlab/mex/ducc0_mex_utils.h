@@ -87,34 +87,35 @@ inline vector<size_t> convertAxes(const mxArray *axes_arr, size_t ndim)
 }
 
 // Helper to compute MATLAB linear index from row-major indices
-inline size_t matlabLinearIndex(const vector<size_t> &indices_rowmajor,
-                                 const mwSize *dims_matlab, mwSize ndim)
+// Optimized version that pre-computes strides
+inline size_t matlabLinearIndex(const size_t *indices_rowmajor,
+                                 const size_t *strides_matlab, size_t ndim)
 {
     size_t idx = 0;
-    size_t stride = 1;
     // MATLAB uses column-major, so reverse the indices
-    for (mwSize i = 0; i < ndim; ++i) {
-        idx += indices_rowmajor[ndim - 1 - i] * stride;
-        stride *= dims_matlab[i];
+    for (size_t i = 0; i < ndim; ++i) {
+        idx += indices_rowmajor[ndim - 1 - i] * strides_matlab[i];
     }
     return idx;
 }
 
 // Helper to increment row-major indices (rightmost dimension first)
-inline void incrementIndices(vector<size_t> &indices, const vector<size_t> &shape)
+// Optimized inline version
+inline bool incrementIndices(size_t *indices, const size_t *shape, size_t ndim)
 {
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (size_t i = 0; i < ndim; ++i) {
         indices[i]++;
         if (indices[i] < shape[i]) {
-            return;  // Still valid, done
+            return true;  // Still valid, done
         }
         indices[i] = 0;  // Overflow, carry to next dimension
     }
-    // All indices overflowed - this shouldn't happen if called correctly
+    return false;  // All indices overflowed
 }
 
 // Copy data from MATLAB array to temporary buffer with proper layout
 // This handles column-major to row-major conversion and complex interleaving
+// Optimized version with pre-computed strides
 template<typename T>
 void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &shape_ducc)
 {
@@ -139,15 +140,51 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
             memcpy(buffer, real, nelem * sizeof(T));
         } else {
             // Multi-dimensional - need to reorder
+            // Pre-compute MATLAB strides for faster indexing
+            vector<size_t> strides_matlab(ndim_matlab);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < ndim_matlab; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * dims_matlab[i-1];
+            }
+            
             vector<size_t> indices(shape_ducc.size(), 0);
-            for (size_t i = 0; i < nelem; ++i) {
-                // Calculate MATLAB linear index from row-major indices
-                size_t idx_matlab = matlabLinearIndex(indices, dims_matlab, ndim_matlab);
-                buffer[i] = real[idx_matlab];
-                
-                // Increment indices for next iteration (except for last element)
-                if (i < nelem - 1) {
-                    incrementIndices(indices, shape_ducc);
+            size_t ndim = shape_ducc.size();
+            
+            // Unroll the loop for small dimensions
+            if (ndim == 2) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        indices[0] = idx0;
+                        indices[1] = idx1;
+                        size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                        *buffer++ = real[idx_matlab];
+                    }
+                }
+            } else if (ndim == 3) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                size_t idx2_max = shape_ducc[2];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        for (size_t idx2 = 0; idx2 < idx2_max; ++idx2) {
+                            indices[0] = idx0;
+                            indices[1] = idx1;
+                            indices[2] = idx2;
+                            size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                            *buffer++ = real[idx_matlab];
+                        }
+                    }
+                }
+            } else {
+                // General case
+                for (size_t i = 0; i < nelem; ++i) {
+                    size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                    buffer[i] = real[idx_matlab];
+                    if (i < nelem - 1) {
+                        incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                    }
                 }
             }
         }
@@ -159,20 +196,60 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
         
         if (ndim_matlab == 1) {
             // 1D - just interleave (no reordering needed)
-            for (size_t i = 0; i < nelem; ++i) {
-                buffer[i] = T(real[i], imag[i]);
+            // Optimized: use pointer arithmetic
+            const real_t *r = real;
+            const real_t *i = imag;
+            T *b = buffer;
+            for (size_t j = 0; j < nelem; ++j) {
+                *b++ = T(*r++, *i++);
             }
         } else {
             // Multi-dimensional - need to reorder and interleave
+            // Pre-compute MATLAB strides for faster indexing
+            vector<size_t> strides_matlab(ndim_matlab);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < ndim_matlab; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * dims_matlab[i-1];
+            }
+            
             vector<size_t> indices(shape_ducc.size(), 0);
-            for (size_t i = 0; i < nelem; ++i) {
-                // Calculate MATLAB linear index from row-major indices
-                size_t idx_matlab = matlabLinearIndex(indices, dims_matlab, ndim_matlab);
-                buffer[i] = T(real[idx_matlab], imag[idx_matlab]);
-                
-                // Increment indices for next iteration (except for last element)
-                if (i < nelem - 1) {
-                    incrementIndices(indices, shape_ducc);
+            size_t ndim = shape_ducc.size();
+            
+            // Unroll the loop for small dimensions
+            if (ndim == 2) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        indices[0] = idx0;
+                        indices[1] = idx1;
+                        size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                        *buffer++ = T(real[idx_matlab], imag[idx_matlab]);
+                    }
+                }
+            } else if (ndim == 3) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                size_t idx2_max = shape_ducc[2];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        for (size_t idx2 = 0; idx2 < idx2_max; ++idx2) {
+                            indices[0] = idx0;
+                            indices[1] = idx1;
+                            indices[2] = idx2;
+                            size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                            *buffer++ = T(real[idx_matlab], imag[idx_matlab]);
+                        }
+                    }
+                }
+            } else {
+                // General case
+                for (size_t i = 0; i < nelem; ++i) {
+                    size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                    buffer[i] = T(real[idx_matlab], imag[idx_matlab]);
+                    if (i < nelem - 1) {
+                        incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                    }
                 }
             }
         }
@@ -180,6 +257,7 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
 }
 
 // Copy data from buffer to MATLAB array with proper layout
+// Optimized version with pre-computed strides
 template<typename T>
 void copyBufferToMatlab(const T *buffer, mxArray *arr, const vector<size_t> &shape_ducc)
 {
@@ -204,15 +282,52 @@ void copyBufferToMatlab(const T *buffer, mxArray *arr, const vector<size_t> &sha
             memcpy(real, buffer, nelem * sizeof(T));
         } else {
             // Multi-dimensional - need to reorder
+            // Pre-compute MATLAB strides for faster indexing
+            vector<size_t> strides_matlab(ndim_matlab);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < ndim_matlab; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * dims_matlab[i-1];
+            }
+            
             vector<size_t> indices(shape_ducc.size(), 0);
-            for (size_t i = 0; i < nelem; ++i) {
-                // Calculate MATLAB linear index from row-major indices
-                size_t idx_matlab = matlabLinearIndex(indices, dims_matlab, ndim_matlab);
-                real[idx_matlab] = buffer[i];
-                
-                // Increment indices for next iteration (except for last element)
-                if (i < nelem - 1) {
-                    incrementIndices(indices, shape_ducc);
+            size_t ndim = shape_ducc.size();
+            const T *buf = buffer;
+            
+            // Unroll the loop for small dimensions
+            if (ndim == 2) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        indices[0] = idx0;
+                        indices[1] = idx1;
+                        size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                        real[idx_matlab] = *buf++;
+                    }
+                }
+            } else if (ndim == 3) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                size_t idx2_max = shape_ducc[2];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        for (size_t idx2 = 0; idx2 < idx2_max; ++idx2) {
+                            indices[0] = idx0;
+                            indices[1] = idx1;
+                            indices[2] = idx2;
+                            size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                            real[idx_matlab] = *buf++;
+                        }
+                    }
+                }
+            } else {
+                // General case
+                for (size_t i = 0; i < nelem; ++i) {
+                    size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                    real[idx_matlab] = buffer[i];
+                    if (i < nelem - 1) {
+                        incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                    }
                 }
             }
         }
@@ -224,22 +339,65 @@ void copyBufferToMatlab(const T *buffer, mxArray *arr, const vector<size_t> &sha
         
         if (ndim_matlab == 1) {
             // 1D - just deinterleave (no reordering needed)
-            for (size_t i = 0; i < nelem; ++i) {
-                real[i] = buffer[i].real();
-                imag[i] = buffer[i].imag();
+            // Optimized: use pointer arithmetic
+            const T *b = buffer;
+            real_t *r = real;
+            real_t *i = imag;
+            for (size_t j = 0; j < nelem; ++j) {
+                *r++ = b->real();
+                *i++ = b++->imag();
             }
         } else {
             // Multi-dimensional - need to reorder and deinterleave
+            // Pre-compute MATLAB strides for faster indexing
+            vector<size_t> strides_matlab(ndim_matlab);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < ndim_matlab; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * dims_matlab[i-1];
+            }
+            
             vector<size_t> indices(shape_ducc.size(), 0);
-            for (size_t i = 0; i < nelem; ++i) {
-                // Calculate MATLAB linear index from row-major indices
-                size_t idx_matlab = matlabLinearIndex(indices, dims_matlab, ndim_matlab);
-                real[idx_matlab] = buffer[i].real();
-                imag[idx_matlab] = buffer[i].imag();
-                
-                // Increment indices for next iteration (except for last element)
-                if (i < nelem - 1) {
-                    incrementIndices(indices, shape_ducc);
+            size_t ndim = shape_ducc.size();
+            const T *buf = buffer;
+            
+            // Unroll the loop for small dimensions
+            if (ndim == 2) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        indices[0] = idx0;
+                        indices[1] = idx1;
+                        size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                        real[idx_matlab] = buf->real();
+                        imag[idx_matlab] = buf++->imag();
+                    }
+                }
+            } else if (ndim == 3) {
+                size_t idx0_max = shape_ducc[0];
+                size_t idx1_max = shape_ducc[1];
+                size_t idx2_max = shape_ducc[2];
+                for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                    for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                        for (size_t idx2 = 0; idx2 < idx2_max; ++idx2) {
+                            indices[0] = idx0;
+                            indices[1] = idx1;
+                            indices[2] = idx2;
+                            size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                            real[idx_matlab] = buf->real();
+                            imag[idx_matlab] = buf++->imag();
+                        }
+                    }
+                }
+            } else {
+                // General case
+                for (size_t i = 0; i < nelem; ++i) {
+                    size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                    real[idx_matlab] = buffer[i].real();
+                    imag[idx_matlab] = buffer[i].imag();
+                    if (i < nelem - 1) {
+                        incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                    }
                 }
             }
         }
