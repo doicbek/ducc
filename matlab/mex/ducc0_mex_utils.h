@@ -126,8 +126,85 @@ inline bool incrementIndices(size_t *indices, const size_t *shape, size_t ndim)
 // Copy data from MATLAB array to temporary buffer with proper layout
 // This handles column-major to row-major conversion and complex interleaving
 // Optimized version with pre-computed strides
+
+// Overload for real types
 template<typename T>
-void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &shape_ducc)
+typename std::enable_if<!is_complex_v<T>>::type
+copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &shape_ducc)
+{
+    const void *real_data = mxGetData(arr);
+    
+    mwSize ndim_matlab = mxGetNumberOfDimensions(arr);
+    const mwSize *dims_matlab = mxGetDimensions(arr);
+    
+    // Calculate total elements
+    size_t nelem = 1;
+    for (size_t s : shape_ducc) {
+        nelem *= s;
+    }
+    
+    // Real data - copy with dimension reordering
+    const T *real = static_cast<const T *>(real_data);
+    
+    if (ndim_matlab == 1) {
+        // 1D - just copy (no reordering needed)
+        memcpy(buffer, real, nelem * sizeof(T));
+    } else {
+        // Multi-dimensional - need to reorder
+        // Pre-compute MATLAB strides for faster indexing
+        vector<size_t> strides_matlab(ndim_matlab);
+        strides_matlab[0] = 1;
+        for (mwSize i = 1; i < ndim_matlab; ++i) {
+            strides_matlab[i] = strides_matlab[i-1] * dims_matlab[i-1];
+        }
+        
+        vector<size_t> indices(shape_ducc.size(), 0);
+        size_t ndim = shape_ducc.size();
+        
+        // Unroll the loop for small dimensions
+        if (ndim == 2) {
+            size_t idx0_max = shape_ducc[0];
+            size_t idx1_max = shape_ducc[1];
+            for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                    indices[0] = idx0;
+                    indices[1] = idx1;
+                    size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                    *buffer++ = real[idx_matlab];
+                }
+            }
+        } else if (ndim == 3) {
+            size_t idx0_max = shape_ducc[0];
+            size_t idx1_max = shape_ducc[1];
+            size_t idx2_max = shape_ducc[2];
+            for (size_t idx0 = 0; idx0 < idx0_max; ++idx0) {
+                for (size_t idx1 = 0; idx1 < idx1_max; ++idx1) {
+                    for (size_t idx2 = 0; idx2 < idx2_max; ++idx2) {
+                        indices[0] = idx0;
+                        indices[1] = idx1;
+                        indices[2] = idx2;
+                        size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                        *buffer++ = real[idx_matlab];
+                    }
+                }
+            }
+        } else {
+            // General case
+            for (size_t i = 0; i < nelem; ++i) {
+                size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
+                buffer[i] = real[idx_matlab];
+                if (i < nelem - 1) {
+                    incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                }
+            }
+        }
+    }
+}
+
+// Overload for complex types
+template<typename T>
+typename std::enable_if<is_complex_v<T>>::type
+copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &shape_ducc)
 {
     const void *real_data = mxGetData(arr);
     const void *imag_data = mxIsComplex(arr) ? mxGetImagData(arr) : nullptr;
@@ -142,15 +219,17 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
     }
     
     if (imag_data == nullptr) {
-        // Real data - copy with dimension reordering
-        const T *real = static_cast<const T *>(real_data);
+        // Real data stored in complex array - just copy real part
+        using real_t = typename T::value_type;
+        const real_t *real = static_cast<const real_t *>(real_data);
         
         if (ndim_matlab == 1) {
-            // 1D - just copy (no reordering needed)
-            memcpy(buffer, real, nelem * sizeof(T));
+            // 1D - just copy
+            for (size_t i = 0; i < nelem; ++i) {
+                buffer[i] = T(real[i], 0);
+            }
         } else {
             // Multi-dimensional - need to reorder
-            // Pre-compute MATLAB strides for faster indexing
             vector<size_t> strides_matlab(ndim_matlab);
             strides_matlab[0] = 1;
             for (mwSize i = 1; i < ndim_matlab; ++i) {
@@ -160,7 +239,6 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
             vector<size_t> indices(shape_ducc.size(), 0);
             size_t ndim = shape_ducc.size();
             
-            // Unroll the loop for small dimensions
             if (ndim == 2) {
                 size_t idx0_max = shape_ducc[0];
                 size_t idx1_max = shape_ducc[1];
@@ -169,7 +247,7 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
                         indices[0] = idx0;
                         indices[1] = idx1;
                         size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
-                        *buffer++ = real[idx_matlab];
+                        *buffer++ = T(real[idx_matlab], 0);
                     }
                 }
             } else if (ndim == 3) {
@@ -183,15 +261,14 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
                             indices[1] = idx1;
                             indices[2] = idx2;
                             size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
-                            *buffer++ = real[idx_matlab];
+                            *buffer++ = T(real[idx_matlab], 0);
                         }
                     }
                 }
             } else {
-                // General case
                 for (size_t i = 0; i < nelem; ++i) {
                     size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), ndim_matlab);
-                    buffer[i] = real[idx_matlab];
+                    buffer[i] = T(real[idx_matlab], 0);
                     if (i < nelem - 1) {
                         incrementIndices(indices.data(), shape_ducc.data(), ndim);
                     }
@@ -200,8 +277,6 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
         }
     } else {
         // Complex data - interleave real and imaginary parts
-        // T must be a complex type (std::complex<real_t>)
-        static_assert(is_complex_v<T>, "copyMatlabToBuffer: T must be std::complex<real_t> for complex arrays");
         using real_t = typename T::value_type;
         const real_t *real = static_cast<const real_t *>(real_data);
         const real_t *imag = static_cast<const real_t *>(imag_data);
