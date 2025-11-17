@@ -108,35 +108,65 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # On Unix, MEX reads compiler flags from mexopts.sh
-# We'll modify the default mexopts.sh to add -std=c++17 to CXXFLAGS
-# Then source it and call MEX with CXXFLAGS exported
+# We need to create a proper mexopts.sh file that includes -std=c++17
+# MEX can use a custom mexopts.sh via the MEXOPTS environment variable
 if(UNIX)
+    # Create a custom mexopts.sh by copying the default and modifying CXXFLAGS
+    set(CUSTOM_MEXOPTS "${CMAKE_CURRENT_BINARY_DIR}/mexopts_custom.sh")
+    
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
     # Create wrapper that:
-    # 1. Finds and sources the default mexopts.sh
-    # 2. Appends -std=c++17 to CXXFLAGS
-    # 3. Calls MEX (which will use the modified CXXFLAGS)
+    # 1. Finds the default mexopts.sh
+    # 2. Copies it and modifies CXXFLAGS to include -std=c++17
+    # 3. Sets MEXOPTS to point to the custom file
+    # 4. Calls MEX
     file(WRITE ${WRAPPER_SCRIPT}
 "#!/bin/bash
-# Find default mexopts.sh
-MEXOPTS_FILE=\"\"
-# Try common locations
+# Find default mexopts.sh - MEX stores it in a specific location
+# Try to get it from MEX itself
+DEFAULT_MEXOPTS=\"\"
+# Common locations
 for loc in \"${MATLAB_ROOT}/bin/mexopts.sh\" \"$HOME/.matlab/R2021a/mexopts.sh\" \"$HOME/.matlab/mexopts.sh\"; do
     if [ -f \"$loc\" ]; then
-        MEXOPTS_FILE=\"$loc\"
+        DEFAULT_MEXOPTS=\"$loc\"
         break
     fi
 done
 
-# Source mexopts.sh if found, otherwise set defaults
-if [ -n \"$MEXOPTS_FILE\" ] && [ -f \"$MEXOPTS_FILE\" ]; then
-    . \"$MEXOPTS_FILE\"
+# If not found, try to get it from MEX setup
+if [ -z \"$DEFAULT_MEXOPTS\" ]; then
+    MEX_SETUP_OUTPUT=\"$(${MEX_EXECUTABLE} -setup 2>&1)\"
+    # Try to extract path from output
+    DEFAULT_MEXOPTS=\"$(echo \"$MEX_SETUP_OUTPUT\" | grep -oP 'mexopts.sh' | head -1)\"
 fi
 
-# Ensure CXXFLAGS includes -std=c++17
-if [[ \"$CXXFLAGS\" != *\"-std=c++17\"* ]]; then
-    export CXXFLAGS=\"$CXXFLAGS -std=c++17\"
+# Create custom mexopts.sh
+CUSTOM_MEXOPTS=\"${CUSTOM_MEXOPTS}\"
+if [ -n \"$DEFAULT_MEXOPTS\" ] && [ -f \"$DEFAULT_MEXOPTS\" ]; then
+    # Copy default mexopts.sh
+    cp \"$DEFAULT_MEXOPTS\" \"$CUSTOM_MEXOPTS\"
+    # Modify CXXFLAGS to include -std=c++17
+    # Handle both CXXFLAGS=\"...\" and CXXFLAGS='...' formats
+    if ! grep -q '\"-std=c++17\"' \"$CUSTOM_MEXOPTS\" && ! grep -q \"'-std=c++17'\" \"$CUSTOM_MEXOPTS\"; then
+        # Try to append -std=c++17 to existing CXXFLAGS
+        sed -i.bak 's/\\(CXXFLAGS=\"[^\"]*\\)\"/\\1 -std=c++17\"/' \"$CUSTOM_MEXOPTS\" 2>/dev/null || \\
+        sed -i.bak \"s/\\(CXXFLAGS='[^']*\\)'/\\1 -std=c++17'/\" \"$CUSTOM_MEXOPTS\" 2>/dev/null || \\
+        sed -i.bak 's/CXXFLAGS=\"/CXXFLAGS=\"-std=c++17 /' \"$CUSTOM_MEXOPTS\" 2>/dev/null || \\
+        sed -i.bak \"s/CXXFLAGS='/CXXFLAGS='-std=c++17 /\" \"$CUSTOM_MEXOPTS\" 2>/dev/null
+        rm -f \"$CUSTOM_MEXOPTS.bak\" 2>/dev/null
+    fi
+else
+    # Create minimal mexopts.sh if default not found
+    cat > \"$CUSTOM_MEXOPTS\" << 'EOF'
+# Custom mexopts.sh for C++17 support
+CXX=\"g++\"
+CXXFLAGS=\"-std=c++17 -fPIC\"
+LDFLAGS=\"-shared\"
+EOF
 fi
+
+# Set MEXOPTS to use our custom file
+export MEXOPTS=\"$CUSTOM_MEXOPTS\"
 
 # Call MEX
 exec \"${MEX_EXECUTABLE}\" \"$@\"
