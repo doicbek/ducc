@@ -107,6 +107,14 @@ set(MEX_SOURCES
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# On Unix, create a wrapper script once that sets CXXFLAGS
+# This ensures C++17 is used for all MEX files
+if(UNIX)
+    set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
+    file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash\nexport CXXFLAGS=\"-std=c++17\"\nexec \"${MEX_EXECUTABLE}\" \"$@\"\n")
+    file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
 # Custom command to build MEX files
 # Note: MEX doesn't accept compiler flags as direct arguments
 # We need to pass C++17 standard via CXXFLAGS environment variable
@@ -120,14 +128,8 @@ foreach(mex_file ${MEX_SOURCES})
     # Create custom command to build MEX file
     # Pass C++17 standard via CXXFLAGS environment variable
     # This is required for DUCC which uses C++17 features
-    # On Unix, MEX may not read CXXFLAGS from environment, so we use a wrapper script
+    # On Unix, use the wrapper script that sets CXXFLAGS
     if(UNIX)
-        # Create a wrapper script that sets CXXFLAGS and calls MEX
-        # This ensures C++17 is used
-        set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
-        file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash\nexport CXXFLAGS=\"-std=c++17\"\nexec \"${MEX_EXECUTABLE}\" \"$@\"\n")
-        file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-        
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
             COMMAND ${WRAPPER_SCRIPT}
