@@ -109,8 +109,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Custom command to build MEX files
 # Note: MEX doesn't accept compiler flags as direct arguments
-# We'll let MEX use its default compiler settings, or set flags via environment
-# For custom flags, users should configure mexopts.sh/mexopts.bat or set CXXFLAGS
+# We need to pass C++17 standard via CXXFLAGS environment variable
+# DUCC requires C++17 features (fold expressions, if constexpr, std::optional, etc.)
 foreach(mex_file ${MEX_SOURCES})
     get_filename_component(mex_name ${mex_file} NAME_WE)
     
@@ -118,11 +118,12 @@ foreach(mex_file ${MEX_SOURCES})
     set(MEX_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${mex_name}.${MEX_EXT}")
     
     # Create custom command to build MEX file
-    # Don't pass compiler flags directly - MEX will use its default settings
-    # Users can set CXXFLAGS environment variable before building if needed
+    # Pass C++17 standard via CXXFLAGS environment variable
+    # This is required for DUCC which uses C++17 features
     add_custom_command(
         OUTPUT ${MEX_OUTPUT}
-        COMMAND ${MEX_EXECUTABLE}
+        COMMAND ${CMAKE_COMMAND} -E env CXXFLAGS="-std=c++17"
+            ${MEX_EXECUTABLE}
             -I${MATLAB_INCLUDE_DIR}
             -I${DUCC_SRC_DIR}
             -I${CMAKE_CURRENT_SOURCE_DIR}
