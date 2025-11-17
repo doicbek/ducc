@@ -108,57 +108,64 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # On Unix, MEX reads compiler flags from mexopts.sh
-# The most reliable way is to call MEX with verbose output to see what it's doing,
-# then intercept and modify the compiler command directly
-# Alternative: Use MEX's ability to accept compiler flags via command line (if supported)
-# Or: Create a wrapper that intercepts the compiler call and adds -std=c++17
+# We need to directly modify the mexopts.sh file that MEX uses
+# First, find it, then modify it in place to add -std=c++17
 if(UNIX)
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
-    # Create a wrapper that intercepts compiler calls and adds -std=c++17
-    # This is more reliable than trying to modify mexopts.sh
+    # Strategy: Find the actual mexopts.sh file MEX uses, modify it directly
+    # This is more aggressive but should work
     file(WRITE ${WRAPPER_SCRIPT}
 "#!/bin/bash
-# Wrapper to ensure C++17 is used with MEX
-# Strategy: Intercept compiler calls and add -std=c++17
+# Find and modify the mexopts.sh file that MEX actually uses
+# MEX stores this in a user-specific location or MATLAB installation
 
-# Create a wrapper for the C++ compiler that adds -std=c++17
-COMPILER_WRAPPER=\"${CMAKE_CURRENT_BINARY_DIR}/cxx_wrapper.sh\"
-cat > \"$COMPILER_WRAPPER\" << 'COMPWRAPEOF'
-#!/bin/bash
-# Find the real compiler (g++ or clang++)
-REAL_CXX=\"\"
-for cxx in g++ clang++; do
-    if command -v \"$cxx\" >/dev/null 2>&1; then
-        REAL_CXX=\"$cxx\"
-        break
-    fi
-done
-if [ -z \"$REAL_CXX\" ]; then
-    echo \"Error: No C++ compiler found\" >&2
-    exit 1
+# Try to find mexopts.sh
+MEXOPTS_FILE=\"\"
+# Check user's MATLAB preferences directory first (most common)
+MATLAB_PREFS=\"$HOME/.matlab\"
+if [ -d \"$MATLAB_PREFS\" ]; then
+    # Look for mexopts.sh in version-specific or general location
+    for ver_dir in \"$MATLAB_PREFS\"/*/mexopts.sh \"$MATLAB_PREFS\"/mexopts.sh; do
+        if [ -f \"$ver_dir\" ]; then
+            MEXOPTS_FILE=\"$ver_dir\"
+            break
+        fi
+    done
 fi
 
-# Check if -std= is already in arguments
-HAS_STD=false
-for arg in \"$@\"; do
-    if [[ \"$arg\" == -std=* ]]; then
-        HAS_STD=true
-        break
-    fi
-done
-
-# Add -std=c++17 if not present
-if [ \"$HAS_STD\" = false ]; then
-    exec \"$REAL_CXX\" -std=c++17 \"$@\"
-else
-    exec \"$REAL_CXX\" \"$@\"
+# If not found, try MATLAB bin directory
+if [ -z \"$MEXOPTS_FILE\" ] && [ -f \"${MATLAB_ROOT}/bin/mexopts.sh\" ]; then
+    MEXOPTS_FILE=\"${MATLAB_ROOT}/bin/mexopts.sh\"
 fi
-COMPWRAPEOF
-chmod +x \"$COMPILER_WRAPPER\"
 
-# Export CXX to use our wrapper
-export CXX=\"$COMPILER_WRAPPER\"
-# Also try CXXFLAGS as backup
+# If still not found, try to get it from MEX
+if [ -z \"$MEXOPTS_FILE\" ]; then
+    # Run mex -setup to see where it points
+    MEX_OUTPUT=\"$(${MEX_EXECUTABLE} -setup 2>&1 || true)\"
+    # Try to extract path (this is a fallback)
+fi
+
+# If we found mexopts.sh, modify it
+if [ -n \"$MEXOPTS_FILE\" ] && [ -f \"$MEXOPTS_FILE\" ]; then
+    # Backup original
+    cp \"$MEXOPTS_FILE\" \"$MEXOPTS_FILE.bak\" 2>/dev/null || true
+    
+    # Modify CXXFLAGS to include -std=c++17
+    # Try multiple sed patterns to handle different formats
+    if ! grep -q '\"-std=c++17\"' \"$MEXOPTS_FILE\" && ! grep -q \"'-std=c++17'\" \"$MEXOPTS_FILE\"; then
+        # Pattern 1: CXXFLAGS=\"...\"
+        sed -i.tmp 's/\\(CXXFLAGS=\"[^\"]*\\)\"/\\1 -std=c++17\"/' \"$MEXOPTS_FILE\" 2>/dev/null || true
+        # Pattern 2: CXXFLAGS='...'
+        sed -i.tmp \"s/\\(CXXFLAGS='[^']*\\)'/\\1 -std=c++17'/\" \"$MEXOPTS_FILE\" 2>/dev/null || true
+        # Pattern 3: CXXFLAGS=\" (at start)
+        sed -i.tmp 's/^\\(CXXFLAGS=\"\\)/\\1-std=c++17 /' \"$MEXOPTS_FILE\" 2>/dev/null || true
+        # Pattern 4: CXXFLAGS=' (at start)
+        sed -i.tmp \"s/^\\(CXXFLAGS='\\)/\\1-std=c++17 /\" \"$MEXOPTS_FILE\" 2>/dev/null || true
+        rm -f \"$MEXOPTS_FILE.tmp\" 2>/dev/null || true
+    fi
+fi
+
+# Also set environment variables as backup
 export CXXFLAGS=\"-std=c++17\"
 
 # Call MEX
