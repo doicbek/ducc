@@ -120,11 +120,14 @@ foreach(mex_file ${MEX_SOURCES})
     # Create custom command to build MEX file
     # Pass C++17 standard via CXXFLAGS environment variable
     # This is required for DUCC which uses C++17 features
-    # Use shell to properly export the environment variable
+    # MEX reads CXXFLAGS from environment, but we need to ensure it's set
     if(UNIX)
+        # On Unix, use shell to export CXXFLAGS before calling MEX
+        # Need to properly quote and escape the command
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
-            COMMAND sh -c "export CXXFLAGS='-std=c++17' && ${MEX_EXECUTABLE} -I${MATLAB_INCLUDE_DIR} -I${DUCC_SRC_DIR} -I${CMAKE_CURRENT_SOURCE_DIR} -cxx -outdir ${CMAKE_CURRENT_BINARY_DIR} ${mex_file} ${DUCC_SOURCES}"
+            COMMAND ${CMAKE_COMMAND} -E env "CXXFLAGS=-std=c++17"
+                sh -c "${MEX_EXECUTABLE} -I${MATLAB_INCLUDE_DIR} -I${DUCC_SRC_DIR} -I${CMAKE_CURRENT_SOURCE_DIR} -cxx -outdir ${CMAKE_CURRENT_BINARY_DIR} ${mex_file} ${DUCC_SOURCES}"
             DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h
             COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
             VERBATIM
