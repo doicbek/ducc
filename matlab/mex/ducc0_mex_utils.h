@@ -29,6 +29,16 @@ namespace ducc0_mex {
 using namespace ducc0;
 using namespace std;
 
+// Helper trait to check if T is a complex type
+template<typename T>
+struct is_complex : std::false_type {};
+
+template<typename T>
+struct is_complex<std::complex<T>> : std::true_type {};
+
+template<typename T>
+constexpr bool is_complex_v = is_complex<T>::value;
+
 // Error handler that throws MATLAB error
 inline void handleDuccError(const exception &e)
 {
@@ -190,6 +200,8 @@ void copyMatlabToBuffer(const mxArray *arr, T *buffer, const vector<size_t> &sha
         }
     } else {
         // Complex data - interleave real and imaginary parts
+        // T must be a complex type (std::complex<real_t>)
+        static_assert(is_complex_v<T>, "copyMatlabToBuffer: T must be std::complex<real_t> for complex arrays");
         using real_t = typename T::value_type;
         const real_t *real = static_cast<const real_t *>(real_data);
         const real_t *imag = static_cast<const real_t *>(imag_data);
