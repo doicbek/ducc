@@ -109,9 +109,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # On Unix, create a wrapper script once that sets CXXFLAGS
 # This ensures C++17 is used for all MEX files
+# MEX on Unix reads compiler flags from mexopts.sh, but CXXFLAGS should also work
 if(UNIX)
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
-    file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash\nexport CXXFLAGS=\"-std=c++17\"\nexec \"${MEX_EXECUTABLE}\" \"$@\"\n")
+    # Export CXXFLAGS and ensure it's passed to the compiler
+    # Use exec to replace shell with MEX process
+    file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash\nexport CXXFLAGS=\"-std=c++17\"\nexport CXX=\"${CMAKE_CXX_COMPILER}\"\nexec \"${MEX_EXECUTABLE}\" \"$@\"\n")
     file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endif()
 
