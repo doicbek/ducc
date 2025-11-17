@@ -107,69 +107,40 @@ set(MEX_SOURCES
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# On Unix, MEX reads compiler flags from mexopts.sh
-# We need to directly modify the mexopts.sh file that MEX uses
-# First, find it, then modify it in place to add -std=c++17
+# On Unix, MEX can accept CXXFLAGS directly as a command-line argument
+# This is the simplest and most reliable approach
 if(UNIX)
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
-    # Strategy: Find the actual mexopts.sh file MEX uses, modify it directly
-    # This is more aggressive but should work
+    # Pass CXXFLAGS directly to MEX command
+    # MEX supports: mex CXXFLAGS="..." source.cpp
     file(WRITE ${WRAPPER_SCRIPT}
 "#!/bin/bash
-# Find and modify the mexopts.sh file that MEX actually uses
-# MEX stores this in a user-specific location or MATLAB installation
+# Pass CXXFLAGS directly to MEX command
+# MEX supports: mex CXXFLAGS=\"...\" source.cpp
+# This is the most reliable way to ensure -std=c++17 is used
 
-# Try to find mexopts.sh
-MEXOPTS_FILE=\"\"
-# Check user's MATLAB preferences directory first (most common)
-MATLAB_PREFS=\"$HOME/.matlab\"
-if [ -d \"$MATLAB_PREFS\" ]; then
-    # Look for mexopts.sh in version-specific or general location
-    for ver_dir in \"$MATLAB_PREFS\"/*/mexopts.sh \"$MATLAB_PREFS\"/mexopts.sh; do
-        if [ -f \"$ver_dir\" ]; then
-            MEXOPTS_FILE=\"$ver_dir\"
-            break
-        fi
-    done
-fi
-
-# If not found, try MATLAB bin directory
-if [ -z \"$MEXOPTS_FILE\" ] && [ -f \"${MATLAB_ROOT}/bin/mexopts.sh\" ]; then
-    MEXOPTS_FILE=\"${MATLAB_ROOT}/bin/mexopts.sh\"
-fi
-
-# If still not found, try to get it from MEX
-if [ -z \"$MEXOPTS_FILE\" ]; then
-    # Run mex -setup to see where it points
-    MEX_OUTPUT=\"$(${MEX_EXECUTABLE} -setup 2>&1 || true)\"
-    # Try to extract path (this is a fallback)
-fi
-
-# If we found mexopts.sh, modify it
-if [ -n \"$MEXOPTS_FILE\" ] && [ -f \"$MEXOPTS_FILE\" ]; then
-    # Backup original
-    cp \"$MEXOPTS_FILE\" \"$MEXOPTS_FILE.bak\" 2>/dev/null || true
-    
-    # Modify CXXFLAGS to include -std=c++17
-    # Try multiple sed patterns to handle different formats
-    if ! grep -q '\"-std=c++17\"' \"$MEXOPTS_FILE\" && ! grep -q \"'-std=c++17'\" \"$MEXOPTS_FILE\"; then
-        # Pattern 1: CXXFLAGS=\"...\"
-        sed -i.tmp 's/\\(CXXFLAGS=\"[^\"]*\\)\"/\\1 -std=c++17\"/' \"$MEXOPTS_FILE\" 2>/dev/null || true
-        # Pattern 2: CXXFLAGS='...'
-        sed -i.tmp \"s/\\(CXXFLAGS='[^']*\\)'/\\1 -std=c++17'/\" \"$MEXOPTS_FILE\" 2>/dev/null || true
-        # Pattern 3: CXXFLAGS=\" (at start)
-        sed -i.tmp 's/^\\(CXXFLAGS=\"\\)/\\1-std=c++17 /' \"$MEXOPTS_FILE\" 2>/dev/null || true
-        # Pattern 4: CXXFLAGS=' (at start)
-        sed -i.tmp \"s/^\\(CXXFLAGS='\\)/\\1-std=c++17 /\" \"$MEXOPTS_FILE\" 2>/dev/null || true
-        rm -f \"$MEXOPTS_FILE.tmp\" 2>/dev/null || true
+# Build the command with CXXFLAGS
+# We need to prepend CXXFLAGS=\"-std=c++17\" to the arguments
+# But preserve existing CXXFLAGS if any
+ARGS=(\"$@\")
+# Check if CXXFLAGS is already in arguments
+HAS_CXXFLAGS=false
+for i in \"${!ARGS[@]}\"; do
+    if [[ \"${ARGS[i]}\" == CXXFLAGS=* ]]; then
+        # Append -std=c++17 to existing CXXFLAGS
+        ARGS[i]=\"CXXFLAGS=\\\"\\${ARGS[i]#CXXFLAGS=} -std=c++17\\\"\"
+        HAS_CXXFLAGS=true
+        break
     fi
+done
+
+# If CXXFLAGS not found, prepend it
+if [ \"$HAS_CXXFLAGS\" = false ]; then
+    ARGS=(\"CXXFLAGS=\\\"-std=c++17\\\"\" \"${ARGS[@]}\")
 fi
 
-# Also set environment variables as backup
-export CXXFLAGS=\"-std=c++17\"
-
-# Call MEX
-exec \"${MEX_EXECUTABLE}\" \"$@\"
+# Call MEX with modified arguments
+exec \"${MEX_EXECUTABLE}\" \"${ARGS[@]}\"
 ")
     file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endif()
