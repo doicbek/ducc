@@ -124,14 +124,9 @@ foreach(mex_file ${MEX_SOURCES})
     if(UNIX)
         # Create a wrapper script that sets CXXFLAGS and calls MEX
         # This ensures C++17 is used
-        set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper_${mex_name}.sh")
-        file(GENERATE OUTPUT ${WRAPPER_SCRIPT}
-            CONTENT "#!/bin/bash
-export CXXFLAGS=\"-std=c++17\"
-exec \"${MEX_EXECUTABLE}\" \"$@\"
-")
-        file(COPY ${WRAPPER_SCRIPT} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
-            FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
+        file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash\nexport CXXFLAGS=\"-std=c++17\"\nexec \"${MEX_EXECUTABLE}\" \"$@\"\n")
+        file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
         
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
