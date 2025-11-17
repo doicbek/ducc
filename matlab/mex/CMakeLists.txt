@@ -107,22 +107,10 @@ set(MEX_SOURCES
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Determine compiler-specific flags
-# Note: MEX doesn't accept compiler flags as direct arguments
-# They must be passed via environment variables (CXXFLAGS, CFLAGS)
-# Use conservative flags to ensure compatibility
-if(MSVC)
-    # For MSVC, flags are typically set in mexopts.bat or via environment
-    # Use minimal flags to avoid conflicts with MEX's own settings
-    set(MEX_CXXFLAGS "/W3 /EHsc /D_CRT_SECURE_NO_WARNINGS /O2")
-else()
-    # For GCC/Clang, pass via CXXFLAGS environment variable
-    # Removed -pthread, -march=native, -ffast-math to avoid compatibility issues
-    # MEX will handle threading and optimization flags itself
-    set(MEX_CXXFLAGS "-Wall -Wextra -std=c++17")
-endif()
-
 # Custom command to build MEX files
+# Note: MEX doesn't accept compiler flags as direct arguments
+# We'll let MEX use its default compiler settings, or set flags via environment
+# For custom flags, users should configure mexopts.sh/mexopts.bat or set CXXFLAGS
 foreach(mex_file ${MEX_SOURCES})
     get_filename_component(mex_name ${mex_file} NAME_WE)
     
@@ -130,43 +118,22 @@ foreach(mex_file ${MEX_SOURCES})
     set(MEX_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${mex_name}.${MEX_EXT}")
     
     # Create custom command to build MEX file
-    # MEX compiler flags must be passed via environment variable
-    if(MSVC)
-        # For Windows/MSVC, MEX uses mexopts.bat which reads COMPILER and COMPFLAGS
-        # We'll pass flags via environment variable
-        add_custom_command(
-            OUTPUT ${MEX_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E env COMPFLAGS="${MEX_CXXFLAGS}"
-                ${MEX_EXECUTABLE}
-                -I${MATLAB_INCLUDE_DIR}
-                -I${DUCC_SRC_DIR}
-                -I${CMAKE_CURRENT_SOURCE_DIR}
-                -cxx
-                -outdir ${CMAKE_CURRENT_BINARY_DIR}
-                ${mex_file}
-                ${DUCC_SOURCES}
-            DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h
-            COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
-            VERBATIM
-        )
-    else()
-        # For GCC/Clang, set CXXFLAGS environment variable
-        add_custom_command(
-            OUTPUT ${MEX_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E env CXXFLAGS="${MEX_CXXFLAGS}"
-                ${MEX_EXECUTABLE}
-                -I${MATLAB_INCLUDE_DIR}
-                -I${DUCC_SRC_DIR}
-                -I${CMAKE_CURRENT_SOURCE_DIR}
-                -cxx
-                -outdir ${CMAKE_CURRENT_BINARY_DIR}
-                ${mex_file}
-                ${DUCC_SOURCES}
-            DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h
-            COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
-            VERBATIM
-        )
-    endif()
+    # Don't pass compiler flags directly - MEX will use its default settings
+    # Users can set CXXFLAGS environment variable before building if needed
+    add_custom_command(
+        OUTPUT ${MEX_OUTPUT}
+        COMMAND ${MEX_EXECUTABLE}
+            -I${MATLAB_INCLUDE_DIR}
+            -I${DUCC_SRC_DIR}
+            -I${CMAKE_CURRENT_SOURCE_DIR}
+            -cxx
+            -outdir ${CMAKE_CURRENT_BINARY_DIR}
+            ${mex_file}
+            ${DUCC_SOURCES}
+        DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h
+        COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
+        VERBATIM
+    )
     
     # Create custom target
     add_custom_target(${mex_name}_mex ALL
