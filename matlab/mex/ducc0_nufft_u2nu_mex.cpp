@@ -171,7 +171,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
             }
             
-            cmav<double,2> coord_view(coord_buffer.data(), {npoints, ndim}, vector<ptrdiff_t>());
+            array<size_t,2> coord_shape = {npoints, ndim};
+            cmav<double,2> coord_view(coord_buffer.data(), coord_shape);
             
             // Convert grid from MATLAB to DUCC format
             size_t grid_nelem = 1;
