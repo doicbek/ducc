@@ -46,20 +46,6 @@ T computeNormFactor(int inorm, const vector<size_t> &shape, const vector<size_t>
     return T(1);
 }
 
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
     try {
@@ -130,8 +116,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<double>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<complex<double>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            cfmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<complex<double>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             double fct = computeNormFactor<double>(inorm, shape_ducc, axes);
@@ -160,8 +146,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<float>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<complex<float>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            cfmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<complex<float>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             float fct = computeNormFactor<float>(inorm, shape_ducc, axes);
