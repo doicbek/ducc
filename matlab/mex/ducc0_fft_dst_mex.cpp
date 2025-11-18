@@ -54,20 +54,6 @@ T computeNormFactor(int inorm, const vector<size_t> &shape, const vector<size_t>
     return T(1);
 }
 
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
     try {
@@ -129,8 +115,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<double>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<double> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            cfmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<double> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             double fct = computeNormFactor<double>(inorm, shape_ducc, axes, type);
@@ -139,8 +125,29 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Perform DST
             dst(in_view, out_view, axes, type, fct, ortho, nthreads);
             
-            // Copy output from buffer to MATLAB
-            copyBufferToMatlab<double>(out_buffer.data(), out_arr, shape_ducc);
+            // Copy output from buffer to MATLAB (real data)
+            double *out_data = static_cast<double *>(mxGetData(out_arr));
+            mwSize out_ndim = shape_ducc.size();
+            const mwSize *out_dims = mxGetDimensions(out_arr);
+            
+            // Pre-compute MATLAB strides
+            vector<size_t> strides_matlab(out_ndim);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < out_ndim; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * out_dims[i-1];
+            }
+            
+            // Copy with dimension reordering
+            vector<size_t> indices(shape_ducc.size(), 0);
+            size_t ndim = shape_ducc.size();
+            
+            for (size_t i = 0; i < nelem; ++i) {
+                size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
+                out_data[idx_matlab] = out_buffer[i];
+                if (i < nelem - 1) {
+                    incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                }
+            }
             
         } else if (class_id == mxSINGLE_CLASS) {
             // Real single input -> real single output
@@ -157,8 +164,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<float>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<float> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            cfmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<float> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor
             float fct = computeNormFactor<float>(inorm, shape_ducc, axes, type);
@@ -167,8 +174,29 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Perform DST
             dst(in_view, out_view, axes, type, fct, ortho, nthreads);
             
-            // Copy output from buffer to MATLAB
-            copyBufferToMatlab<float>(out_buffer.data(), out_arr, shape_ducc);
+            // Copy output from buffer to MATLAB (real data)
+            float *out_data = static_cast<float *>(mxGetData(out_arr));
+            mwSize out_ndim = shape_ducc.size();
+            const mwSize *out_dims = mxGetDimensions(out_arr);
+            
+            // Pre-compute MATLAB strides
+            vector<size_t> strides_matlab(out_ndim);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < out_ndim; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * out_dims[i-1];
+            }
+            
+            // Copy with dimension reordering
+            vector<size_t> indices(shape_ducc.size(), 0);
+            size_t ndim = shape_ducc.size();
+            
+            for (size_t i = 0; i < nelem; ++i) {
+                size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
+                out_data[idx_matlab] = out_buffer[i];
+                if (i < nelem - 1) {
+                    incrementIndices(indices.data(), shape_ducc.data(), ndim);
+                }
+            }
             
         } else {
             mexErrMsgIdAndTxt("DUCC0:FFT:DST:TypeError", 
