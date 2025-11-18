@@ -188,7 +188,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             for (size_t i = 0; i < ndim; ++i) {
                 grid_shape_vec[i] = gridshape[i];
             }
-            cfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec, );
+            cfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec);
             
             // Create points buffer
             vector<complex<double>> points_buffer(npoints);
@@ -254,7 +254,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 // Convert to DUCC format (simplified - assumes column-major input)
                 // TODO: Use proper conversion utility
-                cfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec, );
+                cfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec);
                 
                 // Create points buffer for this component
                 vector<complex<double>> points_buffer(npoints);
