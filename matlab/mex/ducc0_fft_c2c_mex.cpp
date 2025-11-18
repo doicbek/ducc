@@ -102,8 +102,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 copyMatlabToBuffer<complex<double>>(in_arr, in_buffer.data(), shape_ducc);
                 
                 // Create DUCC array views
-                cfmav<complex<double>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-                vfmav<complex<double>> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+                cfmav<complex<double>> in_view(in_buffer.data(), shape_ducc);
+                vfmav<complex<double>> out_view(out_buffer.data(), shape_ducc);
                 
                 // Compute normalization factor
                 double fct = computeNormFactor<double>(inorm, shape_ducc, axes);
@@ -126,7 +126,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 copyMatlabToBuffer<double>(in_arr, in_buffer.data(), shape_ducc);
                 
                 // Create DUCC array views
-                cfmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+                cfmav<double> in_view(in_buffer.data(), shape_ducc);
                 
                 // For r2c, output shape is different along last axis
                 vector<size_t> out_shape = shape_ducc;
@@ -135,7 +135,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 for (size_t s : out_shape) out_nelem *= s;
                 out_buffer.resize(out_nelem);
                 
-                vfmav<complex<double>> out_view(out_buffer.data(), out_shape, vector<ptrdiff_t>());
+                vfmav<complex<double>> out_view(out_buffer.data(), out_shape);
                 
                 // Compute normalization factor
                 double fct = computeNormFactor<double>(inorm, shape_ducc, axes);
@@ -168,8 +168,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 copyMatlabToBuffer<complex<float>>(in_arr, in_buffer.data(), shape_ducc);
                 
                 // Create DUCC array views
-                cfmav<complex<float>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-                vfmav<complex<float>> out_view(out_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+                cfmav<complex<float>> in_view(in_buffer.data(), shape_ducc);
+                vfmav<complex<float>> out_view(out_buffer.data(), shape_ducc);
                 
                 // Compute normalization factor
                 float fct = computeNormFactor<float>(inorm, shape_ducc, axes);
@@ -192,7 +192,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 copyMatlabToBuffer<float>(in_arr, in_buffer.data(), shape_ducc);
                 
                 // Create DUCC array views
-                cfmav<float> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+                cfmav<float> in_view(in_buffer.data(), shape_ducc);
                 
                 // For r2c, output shape is different along last axis
                 vector<size_t> out_shape = shape_ducc;
@@ -201,7 +201,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 for (size_t s : out_shape) out_nelem *= s;
                 out_buffer.resize(out_nelem);
                 
-                vfmav<complex<float>> out_view(out_buffer.data(), out_shape, vector<ptrdiff_t>());
+                vfmav<complex<float>> out_view(out_buffer.data(), out_shape);
                 
                 // Compute normalization factor
                 float fct = computeNormFactor<float>(inorm, shape_ducc, axes);

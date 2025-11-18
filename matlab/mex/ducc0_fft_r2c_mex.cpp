@@ -116,8 +116,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<double>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cfmav<double> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vfmav<complex<double>> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            cfmav<double> in_view(in_buffer.data(), shape_ducc);
+            vfmav<complex<double>> out_view(out_buffer.data(), out_shape_ducc);
             
             // Compute normalization factor
             double fct = computeNormFactor<double>(inorm, shape_ducc, axes);
