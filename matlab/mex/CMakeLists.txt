@@ -133,7 +133,8 @@ done
 if [ \"\$HAS_CXXFLAGS\" = false ]; then
     # Prepend CXXFLAGS if not found
     # Include -fPIC for shared library (required for MEX files)
-    exec \"${MEX_EXECUTABLE}\" \"CXXFLAGS=\\\"-std=c++17 -fPIC\\\"\" \"\$@\"
+    # Note: MEX expects CXXFLAGS without quotes around the value
+    exec \"${MEX_EXECUTABLE}\" CXXFLAGS=\"-std=c++17 -fPIC\" \"\$@\"
 else
     # CXXFLAGS already present, check if -fPIC is there
     # If not, we'd need to append it, but for simplicity just pass through
