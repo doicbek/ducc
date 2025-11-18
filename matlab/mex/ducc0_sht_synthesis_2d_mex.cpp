@@ -30,6 +30,7 @@
 #include <vector>
 #include <complex>
 #include <string>
+#include <array>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -225,19 +226,23 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
             }
             
-            cmav<complex<double>,2> alm_view(alm_reshaped.data(), alm_shape, vector<ptrdiff_t>());
+            // Prepare alm shape for DUCC (row-major): [ncomp, nalm]
+            array<size_t,2> alm_shape = {ncomp, nalm_expected};
+            cmav<complex<double>,2> alm_view(alm_reshaped.data(), alm_shape);
             
             // Prepare map buffer and view - DUCC expects [nmaps, ntheta, nphi] in row-major
             size_t map_nelem = nmaps * ntheta * nphi;
             map_buffer.resize(map_nelem);
-            vector<size_t> map_shape = {nmaps, ntheta, nphi};
-            vmav<double,3> map_view(map_buffer.data(), map_shape, vector<ptrdiff_t>());
+            array<size_t,3> map_shape = {nmaps, ntheta, nphi};
+            vmav<double,3> map_view(map_buffer.data(), map_shape);
             
             // Create mstart view
-            cmav<size_t,1> mstart_view(mstart.data(), {mmax+1}, vector<ptrdiff_t>());
+            array<size_t,1> mstart_shape = {mmax+1};
+            cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
             
             // Create ringfactor view
-            cmav<double,1> ringfactor_view(ringfactor.data(), {ntheta}, vector<ptrdiff_t>());
+            array<size_t,1> ringfactor_shape = {ntheta};
+            cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
             
             // Perform synthesis
             synthesis_2d(alm_view, map_view, spin, lmax, mstart_view, 1, 
@@ -263,7 +268,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             vector<float> map_buffer;
             
             // Prepare alm shape for DUCC (row-major): [ncomp, nalm]
-            vector<size_t> alm_shape = {ncomp, nalm_expected};
             size_t alm_nelem = ncomp * nalm_expected;
             alm_buffer.resize(alm_nelem);
             
@@ -286,19 +290,22 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
             }
             
-            cmav<complex<float>,2> alm_view(alm_buffer.data(), alm_shape, vector<ptrdiff_t>());
+            array<size_t,2> alm_shape = {ncomp, nalm_expected};
+            cmav<complex<float>,2> alm_view(alm_buffer.data(), alm_shape);
             
             // Prepare map buffer and view
             size_t map_nelem = nmaps * ntheta * nphi;
             map_buffer.resize(map_nelem);
-            vector<size_t> map_shape = {nmaps, ntheta, nphi};
-            vmav<float,3> map_view(map_buffer.data(), map_shape, vector<ptrdiff_t>());
+            array<size_t,3> map_shape = {nmaps, ntheta, nphi};
+            vmav<float,3> map_view(map_buffer.data(), map_shape);
             
             // Create mstart view
-            cmav<size_t,1> mstart_view(mstart.data(), {mmax+1}, vector<ptrdiff_t>());
+            array<size_t,1> mstart_shape = {mmax+1};
+            cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
             
             // Create ringfactor view
-            cmav<double,1> ringfactor_view(ringfactor.data(), {ntheta}, vector<ptrdiff_t>());
+            array<size_t,1> ringfactor_shape = {ntheta};
+            cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
             
             // Perform synthesis
             synthesis_2d(alm_view, map_view, spin, lmax, mstart_view, 1, 
