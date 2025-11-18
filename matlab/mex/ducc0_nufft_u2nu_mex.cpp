@@ -35,20 +35,6 @@ using namespace std;
 #define M_PI 3.14159265358979323846
 #endif
 
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
     try {
@@ -204,7 +190,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             
             // Create points buffer
             vector<complex<double>> points_buffer(npoints);
-            vmav<complex<double>,1> points_view(points_buffer.data(), {npoints}, vector<ptrdiff_t>());
+            array<size_t,1> points_shape = {npoints};
+            vmav<complex<double>,1> points_view(points_buffer.data(), points_shape);
             
             // Call u2nu
             u2nu<double, double, double, double, double>(
@@ -231,7 +218,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     coord_buffer[idx_ducc] = coord_data[idx_matlab];
                 }
             }
-            cmav<double,2> coord_view(coord_buffer.data(), {npoints, ndim}, vector<ptrdiff_t>());
+            array<size_t,2> coord_shape = {npoints, ndim};
+            cmav<double,2> coord_view(coord_buffer.data(), coord_shape);
             
             // Create Nufft object for reuse
             vector<size_t> grid_shape_vec(ndim);
@@ -240,6 +228,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             }
             Nufft<double, double, double> nufft(false, npoints, grid_shape_vec,
                 epsilon, nthreads, 1.2, 2.5, periodicity, fft_order);
+            
+            // Calculate grid_nelem
+            size_t grid_nelem = 1;
+            for (size_t i = 0; i < ndim; ++i) {
+                grid_nelem *= gridshape[i];
+            }
             
             // Process each component
             double *points_real = mxGetPr(points_arr);
