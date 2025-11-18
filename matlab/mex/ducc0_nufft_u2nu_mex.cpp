@@ -26,6 +26,7 @@
 #include <vector>
 #include <complex>
 #include <cmath>
+#include <array>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -256,7 +257,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 // Create points buffer for this component
                 vector<complex<double>> points_buffer(npoints);
-                vmav<complex<double>,1> points_view(points_buffer.data(), {npoints}, vector<ptrdiff_t>());
+                array<size_t,1> points_shape = {npoints};
+                vmav<complex<double>,1> points_view(points_buffer.data(), points_shape);
                 
                 // Call u2nu for this component
                 nufft.u2nu(forward, 0, grid_view, coord_view, points_view);
