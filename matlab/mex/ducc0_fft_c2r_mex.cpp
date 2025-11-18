@@ -47,20 +47,6 @@ T computeNormFactor(int inorm, const vector<size_t> &shape, const vector<size_t>
     return T(1);
 }
 
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
     try {
@@ -143,8 +129,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<complex<double>>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<complex<double>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<double> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            cfmav<complex<double>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<double> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor (using output shape)
             double fct = computeNormFactor<double>(inorm, out_shape_ducc, axes);
@@ -152,8 +138,32 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Perform c2r FFT
             c2r(in_view, out_view, axes, forward, fct, nthreads);
             
-            // Copy output from buffer to MATLAB
-            copyBufferToMatlab<double>(out_buffer.data(), out_arr, out_shape_ducc);
+            // Copy output from buffer to MATLAB (real data)
+            // Manual copy since copyBufferToMatlab template doesn't handle real types well
+            double *out_data = static_cast<double *>(mxGetData(out_arr));
+            mwSize out_ndim = out_shape_ducc.size();
+            const mwSize *out_dims = mxGetDimensions(out_arr);
+            
+            // Pre-compute MATLAB strides
+            vector<size_t> strides_matlab(out_ndim);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < out_ndim; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * out_dims[i-1];
+            }
+            
+            // Copy with dimension reordering
+            vector<size_t> indices(out_shape_ducc.size(), 0);
+            size_t ndim = out_shape_ducc.size();
+            size_t nelem = 1;
+            for (size_t s : out_shape_ducc) nelem *= s;
+            
+            for (size_t i = 0; i < nelem; ++i) {
+                size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
+                out_data[idx_matlab] = out_buffer[i];
+                if (i < nelem - 1) {
+                    incrementIndices(indices.data(), out_shape_ducc.data(), ndim);
+                }
+            }
             
         } else if (class_id == mxSINGLE_CLASS) {
             // Complex single input -> real single output
@@ -173,8 +183,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             copyMatlabToBuffer<complex<float>>(in_arr, in_buffer.data(), shape_ducc);
             
             // Create DUCC array views
-            cmav<complex<float>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
-            vmav<float> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
+            cfmav<complex<float>> in_view(in_buffer.data(), shape_ducc, vector<ptrdiff_t>());
+            vfmav<float> out_view(out_buffer.data(), out_shape_ducc, vector<ptrdiff_t>());
             
             // Compute normalization factor (using output shape)
             float fct = computeNormFactor<float>(inorm, out_shape_ducc, axes);
@@ -182,8 +192,32 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Perform c2r FFT
             c2r(in_view, out_view, axes, forward, fct, nthreads);
             
-            // Copy output from buffer to MATLAB
-            copyBufferToMatlab<float>(out_buffer.data(), out_arr, out_shape_ducc);
+            // Copy output from buffer to MATLAB (real data)
+            // Manual copy since copyBufferToMatlab template doesn't handle real types well
+            float *out_data = static_cast<float *>(mxGetData(out_arr));
+            mwSize out_ndim = out_shape_ducc.size();
+            const mwSize *out_dims = mxGetDimensions(out_arr);
+            
+            // Pre-compute MATLAB strides
+            vector<size_t> strides_matlab(out_ndim);
+            strides_matlab[0] = 1;
+            for (mwSize i = 1; i < out_ndim; ++i) {
+                strides_matlab[i] = strides_matlab[i-1] * out_dims[i-1];
+            }
+            
+            // Copy with dimension reordering
+            vector<size_t> indices(out_shape_ducc.size(), 0);
+            size_t ndim = out_shape_ducc.size();
+            size_t nelem = 1;
+            for (size_t s : out_shape_ducc) nelem *= s;
+            
+            for (size_t i = 0; i < nelem; ++i) {
+                size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
+                out_data[idx_matlab] = out_buffer[i];
+                if (i < nelem - 1) {
+                    incrementIndices(indices.data(), out_shape_ducc.data(), ndim);
+                }
+            }
             
         } else {
             mexErrMsgIdAndTxt("DUCC0:FFT:C2R:TypeError", 
