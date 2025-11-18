@@ -222,10 +222,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             Alm_Base base_out(lmax, mmax_out);
             
             // Create DUCC array views
-            vector<size_t> alm_in_shape = {ncomp, nalm_in_expected};
-            vector<size_t> alm_out_shape = {ncomp, nalm_out_expected};
-            cmav<complex<float>,2> alm_in_view(alm_in_buffer.data(), alm_in_shape, vector<ptrdiff_t>());
-            vmav<complex<float>,2> alm_out_view(alm_out_buffer.data(), alm_out_shape, vector<ptrdiff_t>());
+            array<size_t,2> alm_in_shape = {ncomp, nalm_in_expected};
+            array<size_t,2> alm_out_shape = {ncomp, nalm_out_expected};
+            cmav<complex<float>,2> alm_in_view(alm_in_buffer.data(), alm_in_shape);
+            vmav<complex<float>,2> alm_out_view(alm_out_buffer.data(), alm_out_shape);
             
             // Perform rotation
             rotate_alm(base_in, alm_in_view, base_out, alm_out_view, psi, theta, phi, nthreads);
