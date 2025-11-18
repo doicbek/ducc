@@ -69,22 +69,6 @@ vector<size_t> build_mstart(size_t lmax, size_t mmax)
     return mstart;
 }
 
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
-// getStringParam is already defined in ducc0_mex_utils.h
-
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
     try {
