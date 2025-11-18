@@ -113,35 +113,30 @@ if(UNIX)
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
     # Pass CXXFLAGS directly to MEX command
     # MEX supports: mex CXXFLAGS="..." source.cpp
-    # Use file(WRITE) with proper escaping for bash script
+    # Use configure_file or write with @ONLY to avoid CMake variable expansion
+    # We'll write it as a literal string, escaping $ signs
     file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash
 # Pass CXXFLAGS directly to MEX command
 # MEX supports: mex CXXFLAGS=\"...\" source.cpp
 # This is the most reliable way to ensure -std=c++17 is used
 
-# Build the command with CXXFLAGS
-# We need to prepend CXXFLAGS=\"-std=c++17\" to the arguments
-# But preserve existing CXXFLAGS if any
-ARGS=(\"$@\")
 # Check if CXXFLAGS is already in arguments
 HAS_CXXFLAGS=false
-for arg in \"$@\"; do
-    if [[ \"$arg\" == CXXFLAGS=* ]]; then
-        # Append -std=c++17 to existing CXXFLAGS
-        NEW_CXXFLAGS=\"${arg} -std=c++17\"
-        ARGS=(\"$NEW_CXXFLAGS\" \"${ARGS[@]}\")
+for arg in \"\$@\"; do
+    if [[ \"\$arg\" == CXXFLAGS=* ]]; then
         HAS_CXXFLAGS=true
         break
     fi
 done
 
-# If CXXFLAGS not found, prepend it
-if [ \"$HAS_CXXFLAGS\" = false ]; then
-    ARGS=(\"CXXFLAGS=\\\"-std=c++17\\\"\" \"${ARGS[@]}\")
+# Build new argument list
+if [ \"\$HAS_CXXFLAGS\" = false ]; then
+    # Prepend CXXFLAGS if not found
+    exec \"${MEX_EXECUTABLE}\" \"CXXFLAGS=\\\"-std=c++17\\\"\" \"\$@\"
+else
+    # CXXFLAGS already present, just pass through
+    exec \"${MEX_EXECUTABLE}\" \"\$@\"
 fi
-
-# Call MEX with modified arguments
-exec \"${MEX_EXECUTABLE}\" \"${ARGS[@]}\"
 ")
     file(CHMOD ${WRAPPER_SCRIPT} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endif()
