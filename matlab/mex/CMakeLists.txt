@@ -67,6 +67,7 @@ set(DUCC_SOURCES
     ${DUCC_SRC_DIR}/ducc0/math/pointing.cc
     ${DUCC_SRC_DIR}/ducc0/math/wigner3j.cc
     ${DUCC_SRC_DIR}/ducc0/math/space_filling.cc
+    ${DUCC_SRC_DIR}/ducc0/math/geom_utils.cc
     ${DUCC_SRC_DIR}/ducc0/fft/fft_inst1.cc
     ${DUCC_SRC_DIR}/ducc0/fft/fft_inst2.cc
     ${DUCC_SRC_DIR}/ducc0/nufft/spreadinterp_inst1.cc
