@@ -111,7 +111,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         }
         
     } catch (const exception &e) {
-        handleDuccError(e);
+        ducc0_mex::handleDuccError(e);
     }
 }
 
