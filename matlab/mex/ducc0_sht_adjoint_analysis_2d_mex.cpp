@@ -30,6 +30,7 @@
 #include <vector>
 #include <complex>
 #include <string>
+#include <array>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -65,22 +66,6 @@ size_t get_default_nphi(size_t mmax)
 {
     return 2 * mmax + 2;
 }
-
-// Helper to get optional parameter
-template<typename T>
-T getOptionalParam(const mxArray *arr, T default_value)
-{
-    if (arr == nullptr || mxIsEmpty(arr)) {
-        return default_value;
-    }
-    if constexpr (is_same_v<T, bool>) {
-        return mxGetScalar(arr) != 0;
-    } else {
-        return static_cast<T>(mxGetScalar(arr));
-    }
-}
-
-// getStringParam is already defined in ducc0_mex_utils.h
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
@@ -207,19 +192,22 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
             }
             
-            cmav<complex<double>,2> alm_view(alm_buffer.data(), {ncomp, nalm_expected}, vector<ptrdiff_t>());
+            array<size_t,2> alm_shape = {ncomp, nalm_expected};
+            cmav<complex<double>,2> alm_view(alm_buffer.data(), alm_shape);
             
             // Prepare map buffer and view
             size_t map_nelem = nmaps * ntheta * nphi;
             map_buffer.resize(map_nelem);
-            vector<size_t> map_shape = {nmaps, ntheta, nphi};
-            vmav<double,3> map_view(map_buffer.data(), map_shape, vector<ptrdiff_t>());
+            array<size_t,3> map_shape = {nmaps, ntheta, nphi};
+            vmav<double,3> map_view(map_buffer.data(), map_shape);
             
             // Create mstart view
-            cmav<size_t,1> mstart_view(mstart.data(), {mmax+1}, vector<ptrdiff_t>());
+            array<size_t,1> mstart_shape = {mmax+1};
+            cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
             
             // Create ringfactor view
-            cmav<double,1> ringfactor_view(ringfactor.data(), {ntheta}, vector<ptrdiff_t>());
+            array<size_t,1> ringfactor_shape = {ntheta};
+            cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
             
             // Perform adjoint analysis
             adjoint_analysis_2d(alm_view, map_view, spin, lmax, mstart_view, 1, 
