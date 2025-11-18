@@ -95,7 +95,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 for (size_t i = 0; i < nelem; ++i) {
                     complex<long double> a_val(a_real[i], a_imag[i]);
-                    complex<long double> prod = conj(a_val) * b_real[i];
+                    complex<long double> prod = conj(a_val) * static_cast<long double>(b_real[i]);
                     acc_real += prod.real();
                     acc_imag += prod.imag();
                 }
@@ -106,7 +106,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 for (size_t i = 0; i < nelem; ++i) {
                     complex<long double> b_val(b_real[i], b_imag[i]);
-                    complex<long double> prod = a_real[i] * b_val;
+                    complex<long double> prod = static_cast<long double>(a_real[i]) * b_val;
                     acc_real += prod.real();
                     acc_imag += prod.imag();
                 }
@@ -139,7 +139,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 for (size_t i = 0; i < nelem; ++i) {
                     complex<long double> a_val(a_real[i], a_imag[i]);
-                    complex<long double> prod = conj(a_val) * b_real[i];
+                    complex<long double> prod = conj(a_val) * static_cast<long double>(b_real[i]);
                     acc_real += prod.real();
                     acc_imag += prod.imag();
                 }
@@ -150,7 +150,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 
                 for (size_t i = 0; i < nelem; ++i) {
                     complex<long double> b_val(b_real[i], b_imag[i]);
-                    complex<long double> prod = a_real[i] * b_val;
+                    complex<long double> prod = static_cast<long double>(a_real[i]) * b_val;
                     acc_real += prod.real();
                     acc_imag += prod.imag();
                 }
