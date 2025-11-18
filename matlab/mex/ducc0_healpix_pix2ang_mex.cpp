@@ -67,7 +67,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         size_t nelem = mxGetNumberOfElements(pix_arr);
         
         // Create HEALPix base
-        Ordering_Scheme scheme = nest ? NEST : RING;
+        detail_healpix::Ordering_Scheme scheme = nest ? detail_healpix::NEST : detail_healpix::RING;
         Healpix_Base2 base(nside, scheme, SET_NSIDE);
         
         // Create output arrays
