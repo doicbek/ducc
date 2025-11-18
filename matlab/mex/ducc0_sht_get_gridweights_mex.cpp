@@ -20,6 +20,7 @@
 #include "ducc0/infra/error_handling.h"
 #include <vector>
 #include <string>
+#include <array>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -45,7 +46,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         
         // Get weights from DUCC
         vector<double> weights_buffer(ntheta);
-        vmav<double,1> weights_view(weights_buffer.data(), {ntheta}, vector<ptrdiff_t>());
+        array<size_t,1> weights_shape = {ntheta};
+        vmav<double,1> weights_view(weights_buffer.data(), weights_shape);
         
         get_gridweights(geometry, weights_view);
         
