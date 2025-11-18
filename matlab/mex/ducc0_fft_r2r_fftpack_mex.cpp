@@ -127,8 +127,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Copy with dimension reordering
             vector<size_t> indices(shape_ducc.size(), 0);
             size_t ndim = shape_ducc.size();
-            size_t nelem = 1;
-            for (size_t s : shape_ducc) nelem *= s;
             
             for (size_t i = 0; i < nelem; ++i) {
                 size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
@@ -177,8 +175,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // Copy with dimension reordering
             vector<size_t> indices(shape_ducc.size(), 0);
             size_t ndim = shape_ducc.size();
-            size_t nelem = 1;
-            for (size_t s : shape_ducc) nelem *= s;
             
             for (size_t i = 0; i < nelem; ++i) {
                 size_t idx_matlab = matlabLinearIndex(indices.data(), strides_matlab.data(), out_ndim);
