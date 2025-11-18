@@ -113,8 +113,8 @@ if(UNIX)
     set(WRAPPER_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/mex_wrapper.sh")
     # Pass CXXFLAGS directly to MEX command
     # MEX supports: mex CXXFLAGS="..." source.cpp
-    file(WRITE ${WRAPPER_SCRIPT}
-"#!/bin/bash
+    # Use file(WRITE) with proper escaping for bash script
+    file(WRITE ${WRAPPER_SCRIPT} "#!/bin/bash
 # Pass CXXFLAGS directly to MEX command
 # MEX supports: mex CXXFLAGS=\"...\" source.cpp
 # This is the most reliable way to ensure -std=c++17 is used
@@ -125,10 +125,11 @@ if(UNIX)
 ARGS=(\"$@\")
 # Check if CXXFLAGS is already in arguments
 HAS_CXXFLAGS=false
-for i in \"${!ARGS[@]}\"; do
-    if [[ \"${ARGS[i]}\" == CXXFLAGS=* ]]; then
+for arg in \"$@\"; do
+    if [[ \"$arg\" == CXXFLAGS=* ]]; then
         # Append -std=c++17 to existing CXXFLAGS
-        ARGS[i]=\"CXXFLAGS=\\\"\\${ARGS[i]#CXXFLAGS=} -std=c++17\\\"\"
+        NEW_CXXFLAGS=\"${arg} -std=c++17\"
+        ARGS=(\"$NEW_CXXFLAGS\" \"${ARGS[@]}\")
         HAS_CXXFLAGS=true
         break
     fi
