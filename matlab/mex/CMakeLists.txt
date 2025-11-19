@@ -81,6 +81,26 @@ set(DUCC_SOURCES
     ${DUCC_SRC_DIR}/ducc0/healpix/healpix_tables.cc
 )
 
+# Create a static library from DUCC sources
+# This avoids recompiling DUCC sources for every MEX file
+add_library(ducc0_static STATIC ${DUCC_SOURCES})
+target_include_directories(ducc0_static PUBLIC
+    ${DUCC_SRC_DIR}
+)
+target_compile_features(ducc0_static PUBLIC cxx_std_17)
+set_target_properties(ducc0_static PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)
+
+# Get the library file path for linking
+if(WIN32)
+    set(DUCC_LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}ducc0_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
+else()
+    set(DUCC_LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/libducc0_static.a")
+endif()
+
 # MEX source files
 set(MEX_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_fft_c2c_mex.cpp
@@ -159,9 +179,8 @@ foreach(mex_file ${MEX_SOURCES})
     set(MEX_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${mex_name}.${MEX_EXT}")
     
     # Create custom command to build MEX file
-    # Pass C++17 standard via CXXFLAGS environment variable
-    # This is required for DUCC which uses C++17 features
-    # On Unix, use the wrapper script that sets CXXFLAGS
+    # Link against precompiled DUCC static library instead of compiling sources
+    # This dramatically speeds up builds since DUCC sources compile only once
     if(UNIX)
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
@@ -172,13 +191,15 @@ foreach(mex_file ${MEX_SOURCES})
                 -cxx
                 -outdir ${CMAKE_CURRENT_BINARY_DIR}
                 ${mex_file}
-                ${DUCC_SOURCES}
-            DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h ${WRAPPER_SCRIPT}
+                -L${CMAKE_CURRENT_BINARY_DIR}
+                -lducc0_static
+            DEPENDS ${mex_file} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h ${WRAPPER_SCRIPT} ducc0_static
             COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
             VERBATIM
         )
     else()
         # Windows - use CMAKE_COMMAND -E env
+        # On Windows, MEX uses different linking syntax
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
             COMMAND ${CMAKE_COMMAND} -E env CXXFLAGS="-std=c++17"
@@ -189,8 +210,8 @@ foreach(mex_file ${MEX_SOURCES})
                 -cxx
                 -outdir ${CMAKE_CURRENT_BINARY_DIR}
                 ${mex_file}
-                ${DUCC_SOURCES}
-            DEPENDS ${mex_file} ${DUCC_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h
+                ${DUCC_LIB_FILE}
+            DEPENDS ${mex_file} ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_mex_utils.h ducc0_static
             COMMENT "Building MEX file ${mex_name}.${MEX_EXT}"
             VERBATIM
         )
