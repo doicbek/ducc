@@ -60,7 +60,7 @@ function map = synthesis_2d(alm, lmax, varargin)
     if ~isnumeric(alm)
         error('DUCC0:SHT:Synthesis2D:InputError', 'alm must be numeric');
     end
-    if ~iscomplex(alm)
+    if isreal(alm)
         error('DUCC0:SHT:Synthesis2D:InputError', 'alm must be complex');
     end
     
