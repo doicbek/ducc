@@ -92,10 +92,12 @@ set(MEX_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_fft_dst_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_fft_hartley_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_synthesis_2d_mex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_synthesis_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_analysis_2d_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_get_gridweights_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_rotate_alm_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_adjoint_synthesis_2d_mex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_adjoint_synthesis_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_sht_adjoint_analysis_2d_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_nufft_nu2u_mex.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ducc0_nufft_u2nu_mex.cpp
