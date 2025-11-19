@@ -57,7 +57,7 @@ function map = adjoint_analysis_2d(alm, lmax, varargin)
     if ~isnumeric(alm)
         error('DUCC0:SHT:AdjointAnalysis2D:InputError', 'alm must be numeric');
     end
-    if ~iscomplex(alm)
+    if isreal(alm)
         error('DUCC0:SHT:AdjointAnalysis2D:InputError', 'alm must be complex');
     end
     
