@@ -94,6 +94,13 @@ set_target_properties(ducc0_static PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# Add optimization flags for performance
+if(MSVC)
+    target_compile_options(ducc0_static PRIVATE /O2)
+else()
+    target_compile_options(ducc0_static PRIVATE -O3 -march=native)
+endif()
+
 # Get the library file path for linking
 if(WIN32)
     set(DUCC_LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}ducc0_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -157,7 +164,8 @@ if [ \"\$HAS_CXXFLAGS\" = false ]; then
     # Prepend CXXFLAGS if not found
     # Include -fPIC for shared library (required for MEX files)
     # Note: MEX expects CXXFLAGS without quotes around the value
-    exec \"${MEX_EXECUTABLE}\" CXXFLAGS=\"-std=c++17 -fPIC\" \"\$@\"
+    # Include optimization flags for performance: -O3 -march=native
+    exec \"${MEX_EXECUTABLE}\" CXXFLAGS=\"-std=c++17 -fPIC -O3 -march=native\" \"\$@\"
 else
     # CXXFLAGS already present, check if -fPIC is there
     # If not, we'd need to append it, but for simplicity just pass through
@@ -200,9 +208,10 @@ foreach(mex_file ${MEX_SOURCES})
     else()
         # Windows - use CMAKE_COMMAND -E env
         # On Windows, MEX uses different linking syntax
+        # Include optimization flags for performance: /O2
         add_custom_command(
             OUTPUT ${MEX_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E env CXXFLAGS="-std=c++17"
+            COMMAND ${CMAKE_COMMAND} -E env CXXFLAGS="-std=c++17 /O2"
                 ${MEX_EXECUTABLE}
                 -I${MATLAB_INCLUDE_DIR}
                 -I${DUCC_SRC_DIR}
