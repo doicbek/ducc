@@ -174,17 +174,32 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         mwSize ndim = mxGetNumberOfDimensions(map_arr);
         const mwSize *dims = mxGetDimensions(map_arr);
         
-        if (ndim != 2) {
-            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
-                "map must be 2D array [nmaps, npix]");
-        }
+        size_t N = 1;  // Number of maps in batch
+        size_t nmaps_in = 0;
+        size_t npix = 0;
+        bool is_batch_mode = false;
         
-        size_t nmaps_in = dims[0];
-        size_t npix = dims[1];
-        
-        if (nmaps_in != nmaps) {
+        if (ndim == 2) {
+            // Single map mode: [nmaps, npix]
+            nmaps_in = dims[0];
+            npix = dims[1];
+            if (nmaps_in != nmaps) {
+                mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                    "map first dimension must be nmaps");
+            }
+        } else if (ndim == 3) {
+            // Batch mode: [N, ncomp, npix]
+            is_batch_mode = true;
+            N = dims[0];
+            nmaps_in = dims[1];
+            npix = dims[2];
+            if (nmaps_in != nmaps) {
+                mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                    "map second dimension must be nmaps");
+            }
+        } else {
             mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
-                "map first dimension must be nmaps");
+                "map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]");
         }
         
         // Build or get mstart
@@ -242,130 +257,192 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         // Determine data type
         mxClassID class_id = mxGetClassID(map_arr);
         
-        // Create output array (complex, shape [ncomp, nalm_dim])
-        mwSize alm_dims[2] = {ncomp, nalm_dim};
-        mxArray *alm_arr = mxCreateNumericArray(2, alm_dims, class_id, mxCOMPLEX);
+        // Create output array (complex, shape [N, ncomp, nalm_dim] for batch, [ncomp, nalm_dim] for single)
+        mxArray *alm_arr;
+        if (is_batch_mode) {
+            mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+            alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+        } else {
+            mwSize alm_dims[2] = {ncomp, nalm_dim};
+            alm_arr = mxCreateNumericArray(2, alm_dims, class_id, mxCOMPLEX);
+        }
+        
+        // Create mstart view (reused for all maps)
+        array<size_t,1> mstart_shape = {mmax+1};
+        cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
+        
+        // Create ring parameter views (reused for all maps)
+        array<size_t,1> theta_shape = {nrings};
+        cmav<double,1> theta_view(theta.data(), theta_shape);
+        array<size_t,1> nphi_shape = {nrings};
+        cmav<size_t,1> nphi_view(nphi.data(), nphi_shape);
+        array<size_t,1> phi0_shape = {nrings};
+        cmav<double,1> phi0_view(phi0.data(), phi0_shape);
+        array<size_t,1> ringstart_shape = {nrings};
+        cmav<size_t,1> ringstart_view(ringstart.data(), ringstart_shape);
+        array<size_t,1> ringfactor_shape = {nrings};
+        cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
         
         // Process based on data type
         if (class_id == mxDOUBLE_CLASS) {
-            // Real double input -> complex double output
-            vector<double> map_buffer;
-            vector<complex<double>> alm_buffer;
-            
-            // Prepare map shape for DUCC (row-major): [nmaps, npix]
-            size_t map_nelem = nmaps * npix;
-            map_buffer.resize(map_nelem);
-            
-            // Reorder from MATLAB column-major to DUCC row-major
             const double *map_data = mxGetPr(map_arr);
-            for (size_t imap = 0; imap < nmaps; ++imap) {
-                for (size_t ipix = 0; ipix < npix; ++ipix) {
-                    size_t idx_matlab = imap + ipix * nmaps; // Column-major
-                    size_t idx_ducc = imap * npix + ipix; // Row-major
-                    map_buffer[idx_ducc] = map_data[idx_matlab];
-                }
-            }
-            
-            array<size_t,2> map_shape = {nmaps, npix};
-            cmav<double,2> map_view(map_buffer.data(), map_shape);
-            
-            // Prepare alm buffer and view
-            size_t alm_nelem = ncomp * nalm_dim;
-            alm_buffer.resize(alm_nelem);
-            array<size_t,2> alm_shape = {ncomp, nalm_dim};
-            vmav<complex<double>,2> alm_view(alm_buffer.data(), alm_shape);
-            
-            // Create mstart view
-            array<size_t,1> mstart_shape = {mmax+1};
-            cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
-            
-            // Create ring parameter views
-            array<size_t,1> theta_shape = {nrings};
-            cmav<double,1> theta_view(theta.data(), theta_shape);
-            array<size_t,1> nphi_shape = {nrings};
-            cmav<size_t,1> nphi_view(nphi.data(), nphi_shape);
-            array<size_t,1> phi0_shape = {nrings};
-            cmav<double,1> phi0_view(phi0.data(), phi0_shape);
-            array<size_t,1> ringstart_shape = {nrings};
-            cmav<size_t,1> ringstart_view(ringstart.data(), ringstart_shape);
-            array<size_t,1> ringfactor_shape = {nrings};
-            cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
-            
-            // Perform adjoint synthesis
-            adjoint_synthesis(alm_view, map_view, spin, lmax, mstart_view, lstride,
-                             theta_view, nphi_view, phi0_view, ringstart_view,
-                             ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-            
-            // Copy alm from buffer to MATLAB
             double *alm_real = mxGetPr(alm_arr);
             double *alm_imag = mxGetPi(alm_arr);
-            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                    size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
-                    size_t idx_matlab = icomp + ialm * ncomp; // Column-major
-                    alm_real[idx_matlab] = alm_buffer[idx_ducc].real();
-                    alm_imag[idx_matlab] = alm_buffer[idx_ducc].imag();
+            
+            if (is_batch_mode) {
+                // Batch mode: use batch C++ function
+                // Convert from MATLAB column-major to DUCC row-major for all maps
+                vector<double> map_buffer(N * nmaps * npix);
+                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                    for (size_t imap = 0; imap < nmaps; ++imap) {
+                        for (size_t ipix = 0; ipix < npix; ++ipix) {
+                            // MATLAB column-major: [N, nmaps, npix]
+                            size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
+                            // DUCC row-major: [N, nmaps, npix]
+                            size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
+                            map_buffer[idx_ducc] = map_data[idx_matlab];
+                        }
+                    }
+                }
+                
+                // Create 3D views for batch processing (row-major)
+                array<size_t,3> map_shape = {N, nmaps, npix};
+                cmav<double,3> map_view(map_buffer.data(), map_shape);
+                
+                vector<complex<double>> alm_buffer(N * ncomp * nalm_dim);
+                array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                vmav<complex<double>,3> alm_view(alm_buffer.data(), alm_shape);
+                
+                // Call batch function (reuses setup internally)
+                adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                       theta_view, nphi_view, phi0_view, ringstart_view,
+                                       ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                
+                // Copy from buffer to MATLAB (column-major)
+                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                            size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                            size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                        }
+                    }
+                }
+            } else {
+                // Single mode: use regular function
+                vector<double> map_buffer(nmaps * npix);
+                vector<complex<double>> alm_buffer(ncomp * nalm_dim);
+                
+                // Reorder from MATLAB column-major to DUCC row-major
+                for (size_t imap = 0; imap < nmaps; ++imap) {
+                    for (size_t ipix = 0; ipix < npix; ++ipix) {
+                        size_t idx_matlab = imap + ipix * nmaps; // Column-major
+                        size_t idx_ducc = imap * npix + ipix; // Row-major
+                        map_buffer[idx_ducc] = map_data[idx_matlab];
+                    }
+                }
+                
+                array<size_t,2> map_shape = {nmaps, npix};
+                cmav<double,2> map_view(map_buffer.data(), map_shape);
+                
+                array<size_t,2> alm_shape = {ncomp, nalm_dim};
+                vmav<complex<double>,2> alm_view(alm_buffer.data(), alm_shape);
+                
+                // Perform adjoint synthesis
+                adjoint_synthesis(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                 theta_view, nphi_view, phi0_view, ringstart_view,
+                                 ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                
+                // Copy alm from buffer to MATLAB
+                for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                    for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                        size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
+                        size_t idx_matlab = icomp + ialm * ncomp; // Column-major
+                        alm_real[idx_matlab] = alm_buffer[idx_ducc].real();
+                        alm_imag[idx_matlab] = alm_buffer[idx_ducc].imag();
+                    }
                 }
             }
             
         } else if (class_id == mxSINGLE_CLASS) {
-            // Real single input -> complex single output
-            vector<float> map_buffer;
-            vector<complex<float>> alm_buffer;
-            
-            // Prepare map shape for DUCC (row-major): [nmaps, npix]
-            size_t map_nelem = nmaps * npix;
-            map_buffer.resize(map_nelem);
-            
-            // Reorder from MATLAB column-major to DUCC row-major
             const float *map_data = (const float *)mxGetData(map_arr);
-            for (size_t imap = 0; imap < nmaps; ++imap) {
-                for (size_t ipix = 0; ipix < npix; ++ipix) {
-                    size_t idx_matlab = imap + ipix * nmaps; // Column-major
-                    size_t idx_ducc = imap * npix + ipix; // Row-major
-                    map_buffer[idx_ducc] = map_data[idx_matlab];
-                }
-            }
-            
-            array<size_t,2> map_shape = {nmaps, npix};
-            cmav<float,2> map_view(map_buffer.data(), map_shape);
-            
-            // Prepare alm buffer and view
-            size_t alm_nelem = ncomp * nalm_dim;
-            alm_buffer.resize(alm_nelem);
-            array<size_t,2> alm_shape = {ncomp, nalm_dim};
-            vmav<complex<float>,2> alm_view(alm_buffer.data(), alm_shape);
-            
-            // Create mstart view
-            array<size_t,1> mstart_shape = {mmax+1};
-            cmav<size_t,1> mstart_view(mstart.data(), mstart_shape);
-            
-            // Create ring parameter views
-            array<size_t,1> theta_shape = {nrings};
-            cmav<double,1> theta_view(theta.data(), theta_shape);
-            array<size_t,1> nphi_shape = {nrings};
-            cmav<size_t,1> nphi_view(nphi.data(), nphi_shape);
-            array<size_t,1> phi0_shape = {nrings};
-            cmav<double,1> phi0_view(phi0.data(), phi0_shape);
-            array<size_t,1> ringstart_shape = {nrings};
-            cmav<size_t,1> ringstart_view(ringstart.data(), ringstart_shape);
-            array<size_t,1> ringfactor_shape = {nrings};
-            cmav<double,1> ringfactor_view(ringfactor.data(), ringfactor_shape);
-            
-            // Perform adjoint synthesis
-            adjoint_synthesis(alm_view, map_view, spin, lmax, mstart_view, lstride,
-                             theta_view, nphi_view, phi0_view, ringstart_view,
-                             ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-            
-            // Copy alm from buffer to MATLAB
             float *alm_real = (float *)mxGetData(alm_arr);
             float *alm_imag = (float *)mxGetImagData(alm_arr);
-            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                    size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
-                    size_t idx_matlab = icomp + ialm * ncomp; // Column-major
-                    alm_real[idx_matlab] = alm_buffer[idx_ducc].real();
-                    alm_imag[idx_matlab] = alm_buffer[idx_ducc].imag();
+            
+            if (is_batch_mode) {
+                // Batch mode: use batch C++ function
+                // Convert from MATLAB column-major to DUCC row-major for all maps
+                vector<float> map_buffer(N * nmaps * npix);
+                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                    for (size_t imap = 0; imap < nmaps; ++imap) {
+                        for (size_t ipix = 0; ipix < npix; ++ipix) {
+                            // MATLAB column-major: [N, nmaps, npix]
+                            size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
+                            // DUCC row-major: [N, nmaps, npix]
+                            size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
+                            map_buffer[idx_ducc] = map_data[idx_matlab];
+                        }
+                    }
+                }
+                
+                // Create 3D views for batch processing (row-major)
+                array<size_t,3> map_shape = {N, nmaps, npix};
+                cmav<float,3> map_view(map_buffer.data(), map_shape);
+                
+                vector<complex<float>> alm_buffer(N * ncomp * nalm_dim);
+                array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                vmav<complex<float>,3> alm_view(alm_buffer.data(), alm_shape);
+                
+                // Call batch function (reuses setup internally)
+                adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                       theta_view, nphi_view, phi0_view, ringstart_view,
+                                       ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                
+                // Copy from buffer to MATLAB (column-major)
+                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                            size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                            size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                        }
+                    }
+                }
+            } else {
+                // Single mode: use regular function
+                vector<float> map_buffer(nmaps * npix);
+                vector<complex<float>> alm_buffer(ncomp * nalm_dim);
+                
+                // Reorder from MATLAB column-major to DUCC row-major
+                for (size_t imap = 0; imap < nmaps; ++imap) {
+                    for (size_t ipix = 0; ipix < npix; ++ipix) {
+                        size_t idx_matlab = imap + ipix * nmaps; // Column-major
+                        size_t idx_ducc = imap * npix + ipix; // Row-major
+                        map_buffer[idx_ducc] = map_data[idx_matlab];
+                    }
+                }
+                
+                array<size_t,2> map_shape = {nmaps, npix};
+                cmav<float,2> map_view(map_buffer.data(), map_shape);
+                
+                array<size_t,2> alm_shape = {ncomp, nalm_dim};
+                vmav<complex<float>,2> alm_view(alm_buffer.data(), alm_shape);
+                
+                // Perform adjoint synthesis
+                adjoint_synthesis(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                 theta_view, nphi_view, phi0_view, ringstart_view,
+                                 ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                
+                // Copy alm from buffer to MATLAB
+                for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                    for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                        size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
+                        size_t idx_matlab = icomp + ialm * ncomp; // Column-major
+                        alm_real[idx_matlab] = alm_buffer[idx_ducc].real();
+                        alm_imag[idx_matlab] = alm_buffer[idx_ducc].imag();
+                    }
                 }
             }
             

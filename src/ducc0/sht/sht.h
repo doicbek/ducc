@@ -81,9 +81,27 @@ template<typename T> void map2leg(  // FFT
   const cmav<double,1> &ringfactor, // (nrings)
   ptrdiff_t pixstride,
   size_t nthreads);
+template<typename T> void map2leg_batch(  // FFT batch
+  const cmav<T,3> &map, // (N, ncomp, pix)
+  const vmav<complex<T>,4> &leg, // (N, ncomp, nrings, mmax+1)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads);
 template<typename T> void leg2map(  // FFT
   const vmav<T,2> &map, // (ncomp, pix)
   const cmav<complex<T>,3> &leg, // (ncomp, nrings, mmax+1)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads);
+template<typename T> void leg2map_batch(  // FFT batch
+  const vmav<T,3> &map, // (N, ncomp, pix)
+  const cmav<complex<T>,4> &leg, // (N, ncomp, nrings, mmax+1)
   const cmav<size_t,1> &nphi, // (nrings)
   const cmav<double,1> &phi0, // (nrings)
   const cmav<size_t,1> &ringstart, // (nrings)
@@ -94,6 +112,22 @@ template<typename T> void leg2map(  // FFT
 template<typename T> void synthesis(
   const cmav<complex<T>,2> &alm, // (ncomp, *)
   const vmav<T,2> &map, // (ncomp, *)
+  size_t spin,
+  size_t lmax,
+  const cmav<size_t,1> &mstart, // (mmax+1)
+  ptrdiff_t lstride,
+  const cmav<double,1> &theta, // (nrings)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads,
+  SHT_mode mode,
+  bool theta_interpol=false);
+template<typename T> void synthesis_batch(
+  const cmav<complex<T>,3> &alm, // (N, ncomp, *)
+  const vmav<T,3> &map, // (N, ncomp, *)
   size_t spin,
   size_t lmax,
   const cmav<size_t,1> &mstart, // (mmax+1)
@@ -136,6 +170,22 @@ template<typename T, typename Tloc> void synthesis_general(
 template<typename T> void adjoint_synthesis(
   const vmav<complex<T>,2> &alm, // (ncomp, *)
   const cmav<T,2> &map, // (ncomp, *)
+  size_t spin,
+  size_t lmax,
+  const cmav<size_t,1> &mstart, // (mmax+1)
+  ptrdiff_t lstride,
+  const cmav<double,1> &theta, // (nrings)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads,
+  SHT_mode mode,
+  bool theta_interpol=false);
+template<typename T> void adjoint_synthesis_batch(
+  const vmav<complex<T>,3> &alm, // (N, ncomp, *)
+  const cmav<T,3> &map, // (N, ncomp, *)
   size_t spin,
   size_t lmax,
   const cmav<size_t,1> &mstart, // (mmax+1)
@@ -241,11 +291,15 @@ using detail_sht::maximum_safe_l;
 using detail_sht::alm2leg;
 using detail_sht::leg2alm;
 using detail_sht::map2leg;
+using detail_sht::map2leg_batch;
 using detail_sht::leg2map;
+using detail_sht::leg2map_batch;
 using detail_sht::synthesis;
+using detail_sht::synthesis_batch;
 using detail_sht::synthesis_2d;
 using detail_sht::synthesis_general;
 using detail_sht::adjoint_synthesis;
+using detail_sht::adjoint_synthesis_batch;
 using detail_sht::adjoint_synthesis_2d;
 using detail_sht::adjoint_synthesis_general;
 using detail_sht::pseudo_analysis;

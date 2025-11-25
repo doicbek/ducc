@@ -1065,6 +1065,56 @@ template<typename T> void leg2map(  // FFT
       }); /* end of parallel region */
   }
 
+template<typename T> void leg2map_batch(  // FFT batch
+  const vmav<T,3> &map, // (N, ncomp, pix)
+  const cmav<complex<T>,4> &leg, // (N, ncomp, nrings, mmax+1)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads)
+  {
+  size_t N = map.shape(0);
+  MR_assert(N==leg.shape(0), "batch dimension mismatch");
+  size_t ncomp=map.shape(1);
+  MR_assert(ncomp==leg.shape(1), "number of components mismatch");
+  size_t nrings=leg.shape(2);
+  MR_assert(nrings>=1, "need at least one ring");
+  MR_assert((nrings==nphi.shape(0)) && (nrings==ringstart.shape(0))
+         && (nrings==phi0.shape(0)), "inconsistent number of rings");
+  MR_assert(leg.shape(3)>=1, "bad mmax");
+  size_t mmax=leg.shape(3)-1;
+
+  size_t nphmax=0;
+  for (size_t i=0; i<nrings; ++i)
+    nphmax=max(nphi(i),nphmax);
+
+  execDynamic(nrings, nthreads, 8, [&](Scheduler &sched)
+    {
+    ringhelper helper;  // Reused for all N maps - FFT plans and phase shifts cached
+    vmav<double,1> ringtmp({nphmax+2}, UNINITIALIZED);
+    while (auto rng=sched.getNext()) for(auto ith=rng.lo; ith<rng.hi; ++ith)
+      {
+      double rf = ringfactor(ith);
+      // Process all N maps for this ring, reusing helper (FFT plans, phase shifts)
+      for (size_t ibatch = 0; ibatch < N; ++ibatch)
+        {
+        for (size_t icomp=0; icomp<ncomp; ++icomp)
+          {
+          // Extract leg coefficients for this batch, component, and ring
+          vmav<complex<T>,1> leg_ring({mmax+1}, UNINITIALIZED);
+          for (size_t m=0; m<=mmax; ++m)
+            leg_ring(m) = leg(ibatch, icomp, ith, m);
+          helper.phase2ring (nphi(ith),phi0(ith),ringtmp,mmax,leg_ring);
+          for (size_t i=0; i<nphi(ith); ++i)
+            map(ibatch, icomp, ringstart(ith)+i*pixstride) = T(ringtmp(i+1)*rf);
+          }
+        }
+      }
+    }); /* end of parallel region */
+  }
+
 template<typename T> void map2leg(  // FFT
   const cmav<T,2> &map, // (ncomp, pix)
   const vmav<complex<T>,3> &leg, // (ncomp, nrings, mmax+1)
@@ -1144,6 +1194,56 @@ template<typename T> void map2leg(  // FFT
           }
         }
       }); /* end of parallel region */
+  }
+
+template<typename T> void map2leg_batch(  // FFT batch
+  const cmav<T,3> &map, // (N, ncomp, pix)
+  const vmav<complex<T>,4> &leg, // (N, ncomp, nrings, mmax+1)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads)
+  {
+  size_t N = map.shape(0);
+  MR_assert(N==leg.shape(0), "batch dimension mismatch");
+  size_t ncomp=map.shape(1);
+  MR_assert(ncomp==leg.shape(1), "number of components mismatch");
+  size_t nrings=leg.shape(2);
+  MR_assert(nrings>=1, "need at least one ring");
+  MR_assert((nrings==nphi.shape(0)) && (nrings==ringstart.shape(0))
+         && (nrings==phi0.shape(0)), "inconsistent number of rings");
+  MR_assert(leg.shape(3)>=1, "bad mmax");
+  size_t mmax=leg.shape(3)-1;
+
+  size_t nphmax=0;
+  for (size_t i=0; i<nrings; ++i)
+    nphmax=max(nphi(i),nphmax);
+
+  execDynamic(nrings, nthreads, 4, [&](Scheduler &sched)
+    {
+    ringhelper helper;  // Reused for all N maps - FFT plans and phase shifts cached
+    vmav<double,1> ringtmp({nphmax+2}, UNINITIALIZED);
+    while (auto rng=sched.getNext()) for(auto ith=rng.lo; ith<rng.hi; ++ith)
+      {
+      double rf = ringfactor(ith);
+      // Process all N maps for this ring, reusing helper (FFT plans, phase shifts)
+      for (size_t ibatch = 0; ibatch < N; ++ibatch)
+        {
+        for (size_t icomp=0; icomp<ncomp; ++icomp)
+          {
+          for (size_t i=0; i<nphi(ith); ++i)
+            ringtmp(i+1) = map(ibatch, icomp, ringstart(ith)+i*pixstride)*rf;
+          // Extract leg coefficients for this batch, component, and ring
+          vmav<complex<T>,1> leg_ring({mmax+1}, UNINITIALIZED);
+          helper.ring2phase (nphi(ith),phi0(ith),ringtmp,mmax,leg_ring);
+          for (size_t m=0; m<=mmax; ++m)
+            leg(ibatch, icomp, ith, m) = leg_ring(m);
+          }
+        }
+      }
+    }); /* end of parallel region */
   }
 
 // NOTE: legi and lego may overlap, with identical start address and strides 
@@ -1464,6 +1564,71 @@ template<typename T> void synthesis(
     }
   }
 
+template<typename T> void synthesis_batch(
+  const cmav<complex<T>,3> &alm, // (N, ncomp, *)
+  const vmav<T,3> &map, // (N, ncomp, *)
+  size_t spin,
+  size_t lmax,
+  const cmav<size_t,1> &mstart, // (mmax+1)
+  ptrdiff_t lstride,
+  const cmav<double,1> &theta, // (nrings)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads,
+  SHT_mode mode,
+  bool theta_interpol)
+  {
+  size_t N = alm.shape(0);
+  MR_assert(alm.shape(0)==map.shape(0), "batch dimension mismatch");
+  MR_assert(alm.shape(1)==map.shape(1), "component dimension mismatch");
+  
+  sanity_checks(alm.template reinterpret<2>({alm.shape(1), alm.shape(2)}, {alm.stride(1), alm.stride(2)}, 0),
+                lmax, mstart, map.template reinterpret<2>({map.shape(1), map.shape(2)}, {map.stride(1), map.stride(2)}, 0),
+                theta, phi0, nphi, ringstart, ringfactor, spin, mode);
+  vmav<size_t,1> mval({mstart.shape(0)}, UNINITIALIZED);
+  for (size_t i=0; i<mstart.shape(0); ++i)
+    mval(i) = i;
+
+  bool npi, spi;
+  size_t ntheta_tmp;
+  if (downsampling_ok(theta, lmax, npi, spi, ntheta_tmp))
+    {
+    vmav<double,1> theta_tmp({ntheta_tmp}, UNINITIALIZED);
+    for (size_t i=0; i<ntheta_tmp; ++i)
+      theta_tmp(i) = i*pi/(ntheta_tmp-1);
+    auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
+      max(theta.shape(0),ntheta_tmp),mstart.shape(0)}, PAGE_IN(nthreads)));
+    // Process all N maps in batch for alm2leg
+    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+      {
+      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
+      auto legi_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,ntheta_tmp},{}});
+      auto lego_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,theta.shape(0)},{}});
+      alm2leg(alm_2d, legi_2d, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads,
+        mode, theta_interpol);
+      resample_theta(legi_2d, true, true, lego_2d, npi, spi, spin, nthreads, false);
+      }
+    leg2map_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
+    }
+  else
+    {
+    auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
+      theta.shape(0),mstart.shape(0)}, PAGE_IN(nthreads)));
+    // Process all N maps in batch for alm2leg
+    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+      {
+      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
+      auto leg_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{}});
+      alm2leg(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta, nthreads, mode,
+        theta_interpol);
+      }
+    leg2map_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
+    }
+  }
+
 void get_ringtheta_2d(const string &type, const vmav<double, 1> &theta)
   {
   auto nrings = theta.shape(0);
@@ -1531,6 +1696,36 @@ template void synthesis_2d(const cmav<complex<float>,2> &alm,
   const cmav<size_t,1> &mstart, ptrdiff_t lstride, const string &geometry,
   double phi0, const cmav<double,1> &ringfactor, size_t nthreads, SHT_mode mode);
 
+template void synthesis_batch(const cmav<complex<double>,3> &alm,
+  const vmav<double,3> &map, size_t spin, size_t lmax,
+  const cmav<size_t,1> &mstart, ptrdiff_t lstride,
+  const cmav<double,1> &theta, const cmav<size_t,1> &nphi,
+  const cmav<double,1> &phi0, const cmav<size_t,1> &ringstart,
+  const cmav<double,1> &ringfactor, ptrdiff_t pixstride,
+  size_t nthreads, SHT_mode mode, bool theta_interpol);
+template void synthesis_batch(const cmav<complex<float>,3> &alm,
+  const vmav<float,3> &map, size_t spin, size_t lmax,
+  const cmav<size_t,1> &mstart, ptrdiff_t lstride,
+  const cmav<double,1> &theta, const cmav<size_t,1> &nphi,
+  const cmav<double,1> &phi0, const cmav<size_t,1> &ringstart,
+  const cmav<double,1> &ringfactor, ptrdiff_t pixstride,
+  size_t nthreads, SHT_mode mode, bool theta_interpol);
+
+template void adjoint_synthesis_batch(const vmav<complex<double>,3> &alm,
+  const cmav<double,3> &map, size_t spin, size_t lmax,
+  const cmav<size_t,1> &mstart, ptrdiff_t lstride,
+  const cmav<double,1> &theta, const cmav<size_t,1> &nphi,
+  const cmav<double,1> &phi0, const cmav<size_t,1> &ringstart,
+  const cmav<double,1> &ringfactor, ptrdiff_t pixstride,
+  size_t nthreads, SHT_mode mode, bool theta_interpol);
+template void adjoint_synthesis_batch(const vmav<complex<float>,3> &alm,
+  const cmav<float,3> &map, size_t spin, size_t lmax,
+  const cmav<size_t,1> &mstart, ptrdiff_t lstride,
+  const cmav<double,1> &theta, const cmav<size_t,1> &nphi,
+  const cmav<double,1> &phi0, const cmav<size_t,1> &ringstart,
+  const cmav<double,1> &ringfactor, ptrdiff_t pixstride,
+  size_t nthreads, SHT_mode mode, bool theta_interpol);
+
 template<typename T> void adjoint_synthesis(
   const vmav<complex<T>,2> &alm, // (ncomp, *)
   const cmav<T,2> &map, // (ncomp, *)
@@ -1578,6 +1773,72 @@ template<typename T> void adjoint_synthesis(
       nthreads, mode, theta_interpol, true);
     }
   }
+
+template<typename T> void adjoint_synthesis_batch(
+  const vmav<complex<T>,3> &alm, // (N, ncomp, *)
+  const cmav<T,3> &map, // (N, ncomp, *)
+  size_t spin,
+  size_t lmax,
+  const cmav<size_t,1> &mstart, // (mmax+1)
+  ptrdiff_t lstride,
+  const cmav<double,1> &theta, // (nrings)
+  const cmav<size_t,1> &nphi, // (nrings)
+  const cmav<double,1> &phi0, // (nrings)
+  const cmav<size_t,1> &ringstart, // (nrings)
+  const cmav<double,1> &ringfactor, // (nrings)
+  ptrdiff_t pixstride,
+  size_t nthreads,
+  SHT_mode mode,
+  bool theta_interpol)
+  {
+  size_t N = alm.shape(0);
+  MR_assert(alm.shape(0)==map.shape(0), "batch dimension mismatch");
+  MR_assert(alm.shape(1)==map.shape(1), "component dimension mismatch");
+  
+  sanity_checks(alm.template reinterpret<2>({alm.shape(1), alm.shape(2)}, {alm.stride(1), alm.stride(2)}, 0),
+                lmax, mstart, map.template reinterpret<2>({map.shape(1), map.shape(2)}, {map.stride(1), map.stride(2)}, 0),
+                theta, phi0, nphi, ringstart, ringfactor, spin, mode);
+  vmav<size_t,1> mval({mstart.shape(0)}, UNINITIALIZED);
+  for (size_t i=0; i<mstart.shape(0); ++i)
+    mval(i) = i;
+
+  bool npi, spi;
+  size_t ntheta_tmp;
+  if (downsampling_ok(theta, lmax, npi, spi, ntheta_tmp))
+    {
+    vmav<double,1> theta_tmp({ntheta_tmp}, UNINITIALIZED);
+    for (size_t i=0; i<ntheta_tmp; ++i)
+      theta_tmp(i) = i*pi/(ntheta_tmp-1);
+    auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
+      max(theta.shape(0),ntheta_tmp),mstart.shape(0)}, PAGE_IN(nthreads)));
+    map2leg_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
+    // Process all N maps in batch for resample_theta and leg2alm_internal
+    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+      {
+      auto legi_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,theta.shape(0)},{}});
+      auto lego_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,ntheta_tmp},{}});
+      resample_theta(legi_2d, npi, spi, lego_2d, true, true, spin, nthreads, true);
+      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
+      leg2alm_internal(alm_2d, lego_2d, spin, lmax, mval, mstart, lstride, theta_tmp,
+        nthreads, mode, theta_interpol, true);
+      }
+    }
+  else
+    {
+    auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
+      theta.shape(0),mstart.shape(0)}, PAGE_IN(nthreads)));
+    map2leg_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
+    // Process all N maps in batch for leg2alm_internal
+    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+      {
+      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
+      auto leg_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{}});
+      leg2alm_internal(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta,
+        nthreads, mode, theta_interpol, true);
+      }
+    }
+  }
+
 template<typename T> tuple<size_t, size_t, double, double> pseudo_analysis(
   const vmav<complex<T>,2> &alm, // (ncomp, *)
   const cmav<T,2> &map, // (ncomp, *)

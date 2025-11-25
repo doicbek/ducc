@@ -8,8 +8,11 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %   Parameters
 %   ----------
 %   map : numeric array (real)
-%       Input maps, shape [nmaps, npix] where nmaps is either 1 (for spin-0)
-%       or 2 (for spin>0 fields), and npix is the number of pixels.
+%       Input maps. Can be either:
+%       - Single map: shape [nmaps, npix] where nmaps is either 1 (for spin-0)
+%         or 2 (for spin>0 fields), and npix is the number of pixels.
+%       - Multiple maps: shape [N, ncomp*npix] where N is the number of maps,
+%         ncomp is 1 (spin-0) or 2 (spin>0), and npix is the number of pixels.
 %   spin : int
 %       Field spin (0, 1, or 2)
 %   map_info : struct
@@ -24,9 +27,10 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %   Returns
 %   -------
 %   alm : complex array
-%       Harmonic coefficients a_lm of the input map.
+%       Harmonic coefficients a_lm of the input map(s).
 %       A set of two arrays (E and B modes) is returned if spin>0.
-%       Shape [nmaps, nalm] where nalm = nelem from alm_info.
+%       For single map: shape [nmaps, nalm] where nalm = nelem from alm_info.
+%       For multiple maps: shape [N, ncomp, nalm] where N is the number of maps.
 %
 %   Example
 %   -------
@@ -35,6 +39,12 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %   alm_info = ducc0.sht.create_alm_info(3*nside-1);
 %   map = randn(1, map_info.npix);
 %   alm = ducc0.sht.map2alm(map, 0, map_info, alm_info);
+%
+%   % Multiple maps example:
+%   N = 10;
+%   ncomp = 1;
+%   maps = randn(N, ncomp * map_info.npix);
+%   alms = ducc0.sht.map2alm(maps, 0, map_info, alm_info);
 %
 %   See also: alm2map, create_map_info, create_alm_info
 
@@ -51,14 +61,69 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     nthreads = int32(p.Results.nthreads);
     spin = int32(p.Results.spin);
     
-    % Ensure map is 2D: [nmaps, npix]
+    % Determine ncomp based on spin
+    if spin == 0
+        ncomp = 1;
+    else
+        ncomp = 2;
+    end
+    
+    % Get expected npix from map_info
+    npix_expected = map_info.npix;
+    
+    % Detect input format: [N, ncomp*npix] (batch) vs [ncomp, npix] (single)
     map = squeeze(map);
-    if isvector(map)
-        map = map(:)';  % Make it [1, npix]
+    map_dims = size(map);
+    
+    is_batch_mode = false;
+    if length(map_dims) == 2
+        % Check if second dimension matches ncomp*npix (batch mode)
+        if map_dims(2) == ncomp * npix_expected && map_dims(1) > 1
+            is_batch_mode = true;
+            N = map_dims(1);
+        elseif map_dims(1) == ncomp && map_dims(2) == npix_expected
+            % Single map format [ncomp, npix]
+            is_batch_mode = false;
+            N = 1;
+        elseif isvector(map) && length(map) == npix_expected
+            % Single map as vector [1, npix] for spin-0
+            map = map(:)';  % Make it [1, npix]
+            is_batch_mode = false;
+            N = 1;
+        else
+            error('DUCC0:SHT:Map2Alm:InputError', ...
+                'Map dimensions do not match expected format. Expected [ncomp, npix] or [N, ncomp*npix]');
+        end
+    else
+        error('DUCC0:SHT:Map2Alm:InputError', ...
+            'Map must be 2D array');
+    end
+    
+    % Reshape map to [N, ncomp, npix] for consistent processing
+    if is_batch_mode
+        % Reshape from [N, ncomp*npix] to [N, ncomp, npix]
+        map = reshape(map, [N, ncomp, npix_expected]);
+    else
+        % Reshape from [ncomp, npix] to [1, ncomp, npix]
+        map = reshape(map, [1, ncomp, npix_expected]);
+        N = 1;
     end
     
     % Pad map if CAR pixelization
-    map = ducc0.sht.pad_map(map, map_info.si);
+    % Need to handle each map separately for padding
+    map_padded = [];
+    for i = 1:N
+        map_single = squeeze(map(i, :, :));  % [ncomp, npix]
+        map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
+        if i == 1
+            % Initialize with correct size after padding
+            npix_padded = size(map_single_padded, 2);
+            map_padded = zeros(N, ncomp, npix_padded);
+        end
+        map_padded(i, :, :) = map_single_padded;
+    end
+    map = map_padded;
+    npix = size(map, 3);
     
     % Extract SHT info
     sht_info = map_info.si;
@@ -74,10 +139,14 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     
     % Convert ring weights to ringfactor if needed
     % For map2alm (adjoint_synthesis), we need to multiply by weights
-    % The weights are applied via times_weight before adjoint_synthesis
-    map_weighted = ducc0.sht.times_weight(map, sht_info);
+    map_weighted = zeros(size(map));
+    for i = 1:N
+        map_single = squeeze(map(i, :, :));  % [ncomp, npix]
+        map_weighted(i, :, :) = ducc0.sht.times_weight(map_single, sht_info);
+    end
     
-    % First iteration: adjoint synthesis
+    % First iteration: adjoint synthesis (batch mode)
+    % map_weighted is [N, ncomp, npix] which matches batch mode input
     alm = ducc0.sht.adjoint_synthesis(map_weighted, lmax, spin, theta, nphi, ...
         phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
         'nthreads', nthreads);
@@ -90,16 +159,20 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
             'nthreads', nthreads);
         
         % Compute difference
-        dmap = map - map_synth;
+        dmap = map_weighted - map_synth;
         
         % Update alm with adjoint of residual
-        dmap_weighted = ducc0.sht.times_weight(dmap, sht_info);
-        dalm = ducc0.sht.adjoint_synthesis(dmap_weighted, lmax, spin, theta, nphi, ...
+        dalm = ducc0.sht.adjoint_synthesis(dmap, lmax, spin, theta, nphi, ...
             phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
             'nthreads', nthreads);
         
         % Subtract correction
         alm = alm - dalm;
+    end
+    
+    % Reshape output: if single map, return [ncomp, nalm], else [N, ncomp, nalm]
+    if N == 1
+        alm = squeeze(alm);  % Remove singleton dimension
     end
 end
 
