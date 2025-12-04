@@ -113,7 +113,8 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     % Need to handle each map separately for padding
     map_padded = [];
     for i = 1:N
-        map_single = squeeze(map(i, :, :));  % [ncomp, npix]
+        % Extract single map [ncomp, npix] without removing dimensions
+        map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
         map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
         if i == 1
             % Initialize with correct size after padding
@@ -141,7 +142,8 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     % For map2alm (adjoint_synthesis), we need to multiply by weights
     map_weighted = zeros(size(map));
     for i = 1:N
-        map_single = squeeze(map(i, :, :));  % [ncomp, npix]
+        % Extract single map [ncomp, npix] without removing dimensions
+        map_single = reshape(map(i, :, :), [ncomp, size(map, 3)]);
         map_weighted(i, :, :) = ducc0.sht.times_weight(map_single, sht_info);
     end
     
