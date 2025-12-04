@@ -1585,8 +1585,8 @@ template<typename T> void synthesis_batch(
   MR_assert(alm.shape(0)==map.shape(0), "batch dimension mismatch");
   MR_assert(alm.shape(1)==map.shape(1), "component dimension mismatch");
   
-  sanity_checks(alm.template reinterpret<2>({alm.shape(1), alm.shape(2)}, {alm.stride(1), alm.stride(2)}, 0),
-                lmax, mstart, map.template reinterpret<2>({map.shape(1), map.shape(2)}, {map.stride(1), map.stride(2)}, 0),
+  sanity_checks(subarray<2>(alm, {{0,1},{},{}}),
+                lmax, mstart, subarray<2>(map, {{0,1},{},{}}),
                 theta, phi0, nphi, ringstart, ringfactor, spin, mode);
   vmav<size_t,1> mval({mstart.shape(0)}, UNINITIALIZED);
   for (size_t i=0; i<mstart.shape(0); ++i)
@@ -1795,8 +1795,8 @@ template<typename T> void adjoint_synthesis_batch(
   MR_assert(alm.shape(0)==map.shape(0), "batch dimension mismatch");
   MR_assert(alm.shape(1)==map.shape(1), "component dimension mismatch");
   
-  sanity_checks(alm.template reinterpret<2>({alm.shape(1), alm.shape(2)}, {alm.stride(1), alm.stride(2)}, 0),
-                lmax, mstart, map.template reinterpret<2>({map.shape(1), map.shape(2)}, {map.stride(1), map.stride(2)}, 0),
+  sanity_checks(subarray<2>(alm, {{0,1},{},{}}),
+                lmax, mstart, subarray<2>(map, {{0,1},{},{}}),
                 theta, phi0, nphi, ringstart, ringfactor, spin, mode);
   vmav<size_t,1> mval({mstart.shape(0)}, UNINITIALIZED);
   for (size_t i=0; i<mstart.shape(0); ++i)
