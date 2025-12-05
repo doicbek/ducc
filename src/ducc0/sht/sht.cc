@@ -1585,8 +1585,17 @@ template<typename T> void synthesis_batch(
   MR_assert(alm.shape(0)==map.shape(0), "batch dimension mismatch");
   MR_assert(alm.shape(1)==map.shape(1), "component dimension mismatch");
   
-  sanity_checks(subarray<2>(alm, {{0,1},{},{}}),
-                lmax, mstart, subarray<2>(map, {{0,1},{},{}}),
+  // For sanity_checks, create 2D views from first batch item
+  // Use reinterpret to create 2D view from 3D array (first batch item)
+  array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
+  array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
+  cmav<complex<T>,2> alm_2d(alm.data(), alm_shape_2d, alm_stride_2d);
+  
+  array<size_t,2> map_shape_2d = {map.shape(1), map.shape(2)};
+  array<ptrdiff_t,2> map_stride_2d = {map.stride(1), map.stride(2)};
+  cmav<T,2> map_2d(map.data(), map_shape_2d, map_stride_2d);
+  
+  sanity_checks(alm_2d, lmax, mstart, map_2d,
                 theta, phi0, nphi, ringstart, ringfactor, spin, mode);
   vmav<size_t,1> mval({mstart.shape(0)}, UNINITIALIZED);
   for (size_t i=0; i<mstart.shape(0); ++i)
