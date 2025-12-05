@@ -30,7 +30,7 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %       Harmonic coefficients a_lm of the input map(s).
 %       A set of two arrays (E and B modes) is returned if spin>0.
 %       For single map: shape [nmaps, nalm] where nalm = nelem from alm_info.
-%       For multiple maps: shape [N, ncomp, nalm] where N is the number of maps.
+%       For multiple maps: shape [N, ncomp*nalm] where N is the number of maps.
 %
 %   Example
 %   -------
@@ -172,9 +172,13 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         alm = alm - dalm;
     end
     
-    % Reshape output: if single map, return [ncomp, nalm], else [N, ncomp, nalm]
+    % Reshape output: if single map, return [ncomp, nalm], else [N, ncomp*nalm]
     if N == 1
         alm = squeeze(alm);  % Remove singleton dimension
+    else
+        % Reshape from [N, ncomp, nalm] to [N, ncomp*nalm]
+        [~, ncomp_out, nalm] = size(alm);
+        alm = reshape(alm, [N, ncomp_out * nalm]);
     end
 end
 
