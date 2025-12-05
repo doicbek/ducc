@@ -151,14 +151,14 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     % map_weighted is [N, ncomp, npix] which matches batch mode input
     alm = ducc0.sht.adjoint_synthesis(map_weighted, lmax, spin, theta, nphi, ...
         phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
-        'nthreads', nthreads);
+        'nthreads', nthreads, 'N_batch', N);
     
     % Iterative refinement using Jacobi iterations
     for i = 1:n_iter
         % Compute residual: map - synthesis(alm)
         map_synth = ducc0.sht.synthesis(alm, lmax, spin, theta, nphi, ...
             phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
-            'nthreads', nthreads);
+            'nthreads', nthreads, 'N_batch', N);
         
         % Compute difference
         dmap = map_weighted - map_synth;
@@ -166,7 +166,7 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         % Update alm with adjoint of residual
         dalm = ducc0.sht.adjoint_synthesis(dmap, lmax, spin, theta, nphi, ...
             phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
-            'nthreads', nthreads);
+            'nthreads', nthreads, 'N_batch', N);
         
         % Subtract correction
         alm = alm - dalm;
