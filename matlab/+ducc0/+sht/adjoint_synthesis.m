@@ -81,8 +81,8 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
     % Support both 2D [nmaps, npix] and 3D [N, nmaps, npix] arrays
     if ndims(map) == 2 && N_batch == 1
         % Single map mode - keep as is
-    elseif ndims(map) == 3 && N_batch > 1
-        % Batch mode - OK
+    elseif ndims(map) == 3 && N_batch >= 1
+        % Batch mode - OK (N_batch can be 1 for single map in batch format)
     else
         error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]');
     end
