@@ -1890,7 +1890,7 @@ template<typename T> void adjoint_synthesis_batch(
       // Create 3D view of leg for this batch item
       array<size_t,3> leg_shape_3d = {leg.shape(1), leg.shape(2), leg.shape(3)};
       array<ptrdiff_t,3> leg_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
-      cmav<complex<T>,3> leg_2d(leg.data() + ibatch * leg.stride(0), leg_shape_3d, leg_stride_3d);
+      vmav<complex<T>,3> leg_2d(leg.data() + ibatch * leg.stride(0), leg_shape_3d, leg_stride_3d);
       
       leg2alm_internal(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta,
         nthreads, mode, theta_interpol, true);
