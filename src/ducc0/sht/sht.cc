@@ -1613,9 +1613,21 @@ template<typename T> void synthesis_batch(
     // Process all N maps in batch for alm2leg
     for (size_t ibatch = 0; ibatch < N; ++ibatch)
       {
-      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
-      auto legi_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,ntheta_tmp},{}});
-      auto lego_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,theta.shape(0)},{}});
+      // Create 2D view of alm for this batch item
+      array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
+      array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
+      cmav<complex<T>,2> alm_2d(alm.data() + ibatch * alm.stride(0), alm_shape_2d, alm_stride_2d);
+      
+      // Create 3D view of leg for input (ntheta_tmp)
+      array<size_t,3> legi_shape_3d = {leg.shape(1), ntheta_tmp, leg.shape(3)};
+      array<ptrdiff_t,3> legi_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      vmav<complex<T>,3> legi_2d(leg.data() + ibatch * leg.stride(0), legi_shape_3d, legi_stride_3d);
+      
+      // Create 3D view of leg for output (theta.shape(0))
+      array<size_t,3> lego_shape_3d = {leg.shape(1), theta.shape(0), leg.shape(3)};
+      array<ptrdiff_t,3> lego_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      vmav<complex<T>,3> lego_2d(leg.data() + ibatch * leg.stride(0), lego_shape_3d, lego_stride_3d);
+      
       alm2leg(alm_2d, legi_2d, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads,
         mode, theta_interpol);
       resample_theta(legi_2d, true, true, lego_2d, npi, spi, spin, nthreads, false);
@@ -1629,8 +1641,16 @@ template<typename T> void synthesis_batch(
     // Process all N maps in batch for alm2leg
     for (size_t ibatch = 0; ibatch < N; ++ibatch)
       {
-      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
-      auto leg_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{}});
+      // Create 2D view of alm for this batch item
+      array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
+      array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
+      cmav<complex<T>,2> alm_2d(alm.data() + ibatch * alm.stride(0), alm_shape_2d, alm_stride_2d);
+      
+      // Create 3D view of leg for this batch item
+      array<size_t,3> leg_shape_3d = {leg.shape(1), leg.shape(2), leg.shape(3)};
+      array<ptrdiff_t,3> leg_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      vmav<complex<T>,3> leg_2d(leg.data() + ibatch * leg.stride(0), leg_shape_3d, leg_stride_3d);
+      
       alm2leg(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta, nthreads, mode,
         theta_interpol);
       }
@@ -1833,10 +1853,23 @@ template<typename T> void adjoint_synthesis_batch(
     // Process all N maps in batch for resample_theta and leg2alm_internal
     for (size_t ibatch = 0; ibatch < N; ++ibatch)
       {
-      auto legi_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,theta.shape(0)},{}});
-      auto lego_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{0,ntheta_tmp},{}});
+      // Create 3D view of leg for input (theta.shape(0))
+      array<size_t,3> legi_shape_3d = {leg.shape(1), theta.shape(0), leg.shape(3)};
+      array<ptrdiff_t,3> legi_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      cmav<complex<T>,3> legi_2d(leg.data() + ibatch * leg.stride(0), legi_shape_3d, legi_stride_3d);
+      
+      // Create 3D view of leg for output (ntheta_tmp)
+      array<size_t,3> lego_shape_3d = {leg.shape(1), ntheta_tmp, leg.shape(3)};
+      array<ptrdiff_t,3> lego_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      vmav<complex<T>,3> lego_2d(leg.data() + ibatch * leg.stride(0), lego_shape_3d, lego_stride_3d);
+      
       resample_theta(legi_2d, npi, spi, lego_2d, true, true, spin, nthreads, true);
-      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
+      
+      // Create 2D view of alm for this batch item
+      array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
+      array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
+      vmav<complex<T>,2> alm_2d(alm.data() + ibatch * alm.stride(0), alm_shape_2d, alm_stride_2d);
+      
       leg2alm_internal(alm_2d, lego_2d, spin, lmax, mval, mstart, lstride, theta_tmp,
         nthreads, mode, theta_interpol, true);
       }
@@ -1849,8 +1882,16 @@ template<typename T> void adjoint_synthesis_batch(
     // Process all N maps in batch for leg2alm_internal
     for (size_t ibatch = 0; ibatch < N; ++ibatch)
       {
-      auto alm_2d = subarray<2>(alm, {{ibatch,ibatch+1},{},{}});
-      auto leg_2d = subarray<3>(leg, {{ibatch,ibatch+1},{},{}});
+      // Create 2D view of alm for this batch item
+      array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
+      array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
+      vmav<complex<T>,2> alm_2d(alm.data() + ibatch * alm.stride(0), alm_shape_2d, alm_stride_2d);
+      
+      // Create 3D view of leg for this batch item
+      array<size_t,3> leg_shape_3d = {leg.shape(1), leg.shape(2), leg.shape(3)};
+      array<ptrdiff_t,3> leg_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
+      cmav<complex<T>,3> leg_2d(leg.data() + ibatch * leg.stride(0), leg_shape_3d, leg_stride_3d);
+      
       leg2alm_internal(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta,
         nthreads, mode, theta_interpol, true);
       }
