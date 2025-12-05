@@ -68,6 +68,7 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
     addParameter(p, 'mode', 'STANDARD', @(x) ischar(x) || isstring(x));
     addParameter(p, 'theta_interpol', false, @(x) islogical(x) || isnumeric(x));
     addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
+    addParameter(p, 'N_batch', 1, @(x) isnumeric(x) && isscalar(x));
     parse(p, map, lmax, spin, theta, nphi, phi0, ringstart, varargin{:});
     
     % Ensure inputs are correct types
@@ -75,8 +76,15 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
         error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be real');
     end
     
-    if ndims(map) ~= 2
-        error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be 2D array [nmaps, npix]');
+    N_batch = p.Results.N_batch;
+    
+    % Support both 2D [nmaps, npix] and 3D [N, nmaps, npix] arrays
+    if ndims(map) == 2 && N_batch == 1
+        % Single map mode - keep as is
+    elseif ndims(map) == 3 && N_batch > 1
+        % Batch mode - OK
+    else
+        error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]');
     end
     
     % Convert to column vectors and ensure correct types

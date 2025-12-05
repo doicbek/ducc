@@ -67,11 +67,19 @@ function map = synthesis(alm, lmax, spin, theta, nphi, phi0, ringstart, varargin
     addParameter(p, 'mode', 'STANDARD', @(x) ischar(x) || isstring(x));
     addParameter(p, 'theta_interpol', false, @(x) islogical(x) || isnumeric(x));
     addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
+    addParameter(p, 'N_batch', 1, @(x) isnumeric(x) && isscalar(x));
     parse(p, alm, lmax, spin, theta, nphi, phi0, ringstart, varargin{:});
     
     % Ensure inputs are correct types
     if isreal(alm)
         error('DUCC0:SHT:Synthesis:InputError', 'alm must be complex');
+    end
+    
+    N_batch = p.Results.N_batch;
+    
+    % Support both 2D [ncomp, nalm] and 3D [N, ncomp, nalm] arrays
+    if ndims(alm) ~= 2 && ndims(alm) ~= 3
+        error('DUCC0:SHT:Synthesis:InputError', 'alm must be 2D array [ncomp, nalm] or 3D array [N, ncomp, nalm]');
     end
     
     % Convert to column vectors and ensure correct types
