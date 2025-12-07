@@ -78,14 +78,30 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
     end
     
     N_batch = p.Results.N_batch;
+    is_sparse_map = issparse(map);
     
     % Support both 2D [nmaps, npix] and 3D [N, nmaps, npix] arrays
-    if ndims(map) == 2 && N_batch == 1
-        % Single map mode - keep as is
-    elseif ndims(map) == 3 && N_batch >= 1
-        % Batch mode - OK (N_batch can be 1 for single map in batch format)
+    % For sparse arrays, also support 2D batch format [N, ncomp*npix]
+    if is_sparse_map
+        % Sparse arrays are always 2D in MATLAB
+        % Can be [nmaps, npix] for single map or [N, ncomp*npix] for batch
+        if N_batch == 1
+            % Single map mode - OK as 2D [nmaps, npix]
+        elseif N_batch > 1
+            % Batch mode - accept 2D sparse format [N, ncomp*npix]
+            % The MEX function will handle the conversion
+        else
+            error('DUCC0:SHT:AdjointSynthesis:InputError', 'Invalid N_batch for sparse array');
+        end
     else
-        error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]');
+        % Dense arrays: support 2D [nmaps, npix] and 3D [N, nmaps, npix]
+        if ndims(map) == 2 && N_batch == 1
+            % Single map mode - keep as is
+        elseif ndims(map) == 3 && N_batch >= 1
+            % Batch mode - OK (N_batch can be 1 for single map in batch format)
+        else
+            error('DUCC0:SHT:AdjointSynthesis:InputError', 'map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]');
+        end
     end
     
     % Convert to column vectors and ensure correct types
