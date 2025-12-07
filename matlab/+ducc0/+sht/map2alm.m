@@ -103,37 +103,83 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
             'Map must be 2D array');
     end
     
-    % Reshape map to [N, ncomp, npix] for consistent processing
-    if is_batch_mode
-        % Reshape from [N, ncomp*npix] to [N, ncomp, npix]
-        map = reshape(map, [N, ncomp, npix_expected]);
-    else
-        % Reshape from [ncomp, npix] to [1, ncomp, npix]
-        map = reshape(map, [1, ncomp, npix_expected]);
-        N = 1;
-    end
-    
-    % Pad map if CAR pixelization
-    % Need to handle each map separately for padding
-    map_padded = [];
-    for i = 1:N
-        % Extract single map [ncomp, npix] without removing dimensions
-        map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
-        map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
-        if i == 1
-            % Initialize with correct size after padding
-            npix_padded = size(map_single_padded, 2);
-            % Preserve sparsity in initialization
-            if is_sparse_input
-                map_padded = sparse(N, ncomp, npix_padded);
-            else
-                map_padded = zeros(N, ncomp, npix_padded);
+    % For sparse arrays, keep in 2D format (MATLAB doesn't support 3D sparse)
+    % For dense arrays, reshape to 3D for easier processing
+    if is_sparse_input
+        % Keep sparse arrays in 2D format
+        if is_batch_mode
+            % Keep as [N, ncomp*npix] - will be converted to (N*ncomp) x npix for MEX
+            % No reshaping needed
+        else
+            % Keep as [ncomp, npix] for single map
+            % Reshape single vector to [ncomp, npix] if needed
+            if ~is_batch_mode && map_dims(1) ~= ncomp
+                % Already handled above, but ensure shape is correct
             end
         end
-        map_padded(i, :, :) = map_single_padded;
+        npix = npix_expected;
+        % Pad map if CAR pixelization (handle sparse arrays in 2D)
+        % For HEALPix, pad_map is a no-op and preserves sparsity
+        if is_batch_mode
+            % For batch mode sparse: [N, ncomp*npix]
+            % Process each map separately to handle padding
+            % First check if padding is needed by testing first map
+            map_first_2d = reshape(map(1, :), [ncomp, npix_expected]);
+            map_first_padded = ducc0.sht.pad_map(map_first_2d, map_info.si);
+            npix_padded = size(map_first_padded, 2);
+            
+            if npix_padded ~= npix_expected
+                % Need padding - rebuild sparse array with padding
+                map_padded = sparse(N, ncomp * npix_padded);
+                for i = 1:N
+                    % Extract map i and reshape to [ncomp, npix]
+                    map_row = map(i, :);
+                    % For sparse arrays, need to extract as full for reshaping
+                    % (unavoidable when padding is needed)
+                    map_2d = reshape(full(map_row), [ncomp, npix_expected]);
+                    % Pad (preserves structure, may return sparse if input was sparse)
+                    map_2d_padded = ducc0.sht.pad_map(map_2d, map_info.si);
+                    % Reshape back to row and store as sparse
+                    map_padded(i, :) = sparse(reshape(map_2d_padded, [1, ncomp * npix_padded]));
+                end
+                map = map_padded;
+                npix = npix_padded;
+            end
+            % If no padding needed, map stays as-is (sparse preserved)
+        else
+            % Single map: [ncomp, npix]
+            % pad_map preserves sparsity (no-op for HEALPix)
+            map_padded = ducc0.sht.pad_map(map, map_info.si);
+            map = map_padded;
+            npix = size(map, 2);
+        end
+    else
+        % Dense arrays: reshape to 3D for easier processing
+        if is_batch_mode
+            % Reshape from [N, ncomp*npix] to [N, ncomp, npix]
+            map = reshape(map, [N, ncomp, npix_expected]);
+        else
+            % Reshape from [ncomp, npix] to [1, ncomp, npix]
+            map = reshape(map, [1, ncomp, npix_expected]);
+            N = 1;
+        end
+        
+        % Pad map if CAR pixelization
+        map_padded = [];
+        for i = 1:N
+            % Extract single map [ncomp, npix] without removing dimensions
+            map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
+            map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
+            if i == 1
+                % Initialize with correct size after padding
+                npix_padded = size(map_single_padded, 2);
+                map_padded = zeros(N, ncomp, npix_padded);
+            end
+            map_padded(i, :, :) = map_single_padded;
+        end
+        map = map_padded;
+        npix = size(map, 3);
     end
-    map = map_padded;
-    npix = size(map, 3);
     
     % Extract SHT info
     sht_info = map_info.si;
@@ -149,20 +195,23 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     
     % Convert ring weights to ringfactor if needed
     % For map2alm (adjoint_synthesis), we need to multiply by weights
-    % Preserve sparsity in initialization
     if is_sparse_input
-        map_weighted = sparse(size(map));
+        % For sparse arrays, multiply directly (preserves sparsity)
+        % map is 2D: [N, ncomp*npix] or [ncomp, npix]
+        map_weighted = ducc0.sht.times_weight(map, sht_info);
     else
+        % For dense arrays, process in 3D format
         map_weighted = zeros(size(map));
-    end
-    for i = 1:N
-        % Extract single map [ncomp, npix] without removing dimensions
-        map_single = reshape(map(i, :, :), [ncomp, size(map, 3)]);
-        map_weighted(i, :, :) = ducc0.sht.times_weight(map_single, sht_info);
+        for i = 1:N
+            % Extract single map [ncomp, npix] without removing dimensions
+            map_single = reshape(map(i, :, :), [ncomp, size(map, 3)]);
+            map_weighted(i, :, :) = ducc0.sht.times_weight(map_single, sht_info);
+        end
     end
     
     % First iteration: adjoint synthesis (batch mode)
-    % map_weighted is [N, ncomp, npix] which matches batch mode input
+    % For sparse arrays, map_weighted is 2D [N, ncomp*npix] or [ncomp, npix]
+    % The MEX function will handle the 2D sparse format correctly
     alm = ducc0.sht.adjoint_synthesis(map_weighted, lmax, spin, theta, nphi, ...
         phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
         'nthreads', nthreads, 'N_batch', N);
@@ -174,7 +223,7 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
             phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
             'nthreads', nthreads, 'N_batch', N);
         
-        % Compute difference
+        % Compute difference (preserves sparsity if map_weighted is sparse)
         dmap = map_weighted - map_synth;
         
         % Update alm with adjoint of residual
