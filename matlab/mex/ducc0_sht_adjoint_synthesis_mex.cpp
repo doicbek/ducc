@@ -9,7 +9,7 @@
  *                                         mmax, mstart, lstride, pixstride, ringfactor, mode, theta_interpol, nthreads)
  * 
  * Inputs:
- *   map: Map data (real array, shape [nmaps, npix])
+ *   map: Map data (real array, dense or sparse, shape [nmaps, npix] or [N, nmaps, npix])
  *   lmax: Maximum multipole order l
  *   spin: Spin value (0, 1, or 2)
  *   theta: Colatitudes of map rings (double array, size [nrings])
@@ -170,7 +170,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         size_t nmaps = get_nmaps(spin, mode);
         size_t ncomp = get_nalm(spin, mode);
         
+        // Check if sparse (needed for dimension parsing)
+        bool is_sparse = mxIsSparse(map_arr);
+        
         // Get map dimensions
+        // Note: Sparse arrays in MATLAB are always 2D, even if conceptually 3D
+        // When a 3D sparse array is passed, it appears as 2D with size (N*nmaps) x npix
         mwSize ndim = mxGetNumberOfDimensions(map_arr);
         const mwSize *dims = mxGetDimensions(map_arr);
         
@@ -179,27 +184,57 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         size_t npix = 0;
         bool is_batch_mode = false;
         
-        if (ndim == 2) {
-            // Single map mode: [nmaps, npix]
-            nmaps_in = dims[0];
-            npix = dims[1];
-            if (nmaps_in != nmaps) {
-                mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
-                    "map first dimension must be nmaps");
-            }
-        } else if (ndim == 3) {
-            // Batch mode: [N, ncomp, npix]
-            is_batch_mode = true;
-            N = dims[0];
-            nmaps_in = dims[1];
-            npix = dims[2];
-            if (nmaps_in != nmaps) {
-                mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
-                    "map second dimension must be nmaps");
+        if (is_sparse) {
+            // For sparse arrays, MATLAB always presents them as 2D
+            // We need to infer if it's batch mode based on dimensions
+            // If dims[0] is divisible by nmaps and greater than nmaps, it's likely batch mode
+            if (dims[0] > nmaps && (dims[0] % nmaps == 0)) {
+                // Likely batch mode: [N, nmaps, npix] represented as (N*nmaps) x npix
+                is_batch_mode = true;
+                N = dims[0] / nmaps;
+                nmaps_in = nmaps;
+                npix = dims[1];
+            } else if (dims[0] == nmaps) {
+                // Single map mode: [nmaps, npix] (not batch)
+                nmaps_in = dims[0];
+                npix = dims[1];
+                if (nmaps_in != nmaps) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                        "map first dimension must be nmaps");
+                }
+            } else {
+                // Unknown format - try single map mode
+                nmaps_in = dims[0];
+                npix = dims[1];
+                if (nmaps_in != nmaps) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                        "map dimensions do not match expected format for sparse array");
+                }
             }
         } else {
-            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
-                "map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]");
+            // Dense arrays can be 2D or 3D
+            if (ndim == 2) {
+                // Single map mode: [nmaps, npix]
+                nmaps_in = dims[0];
+                npix = dims[1];
+                if (nmaps_in != nmaps) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                        "map first dimension must be nmaps");
+                }
+            } else if (ndim == 3) {
+                // Batch mode: [N, ncomp, npix]
+                is_batch_mode = true;
+                N = dims[0];
+                nmaps_in = dims[1];
+                npix = dims[2];
+                if (nmaps_in != nmaps) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                        "map second dimension must be nmaps");
+                }
+            } else {
+                mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                    "map must be 2D array [nmaps, npix] or 3D array [N, nmaps, npix]");
+            }
         }
         
         // Build or get mstart
@@ -258,6 +293,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         mxClassID class_id = mxGetClassID(map_arr);
         
         // Create output array (complex, shape [N, ncomp, nalm_dim] for batch, [ncomp, nalm_dim] for single)
+        // Output is always dense
         mxArray *alm_arr;
         if (is_batch_mode) {
             mwSize alm_dims[3] = {N, ncomp, nalm_dim};
@@ -285,25 +321,93 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         
         // Process based on data type
         if (class_id == mxDOUBLE_CLASS) {
-            const double *map_data = mxGetPr(map_arr);
             double *alm_real = mxGetPr(alm_arr);
             double *alm_imag = mxGetPi(alm_arr);
             
-            if (is_batch_mode) {
-                // Batch mode: use batch C++ function
-                // Convert from MATLAB column-major to DUCC row-major for all maps
-                vector<double> map_buffer(N * nmaps * npix);
-                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                    for (size_t imap = 0; imap < nmaps; ++imap) {
-                        for (size_t ipix = 0; ipix < npix; ++ipix) {
-                            // MATLAB column-major: [N, nmaps, npix]
-                            size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
-                            // DUCC row-major: [N, nmaps, npix]
-                            size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
-                            map_buffer[idx_ducc] = map_data[idx_matlab];
+            // Helper function to extract sparse or dense data into dense buffer
+            auto extract_map_data = [&](vector<double> &map_buffer) {
+                if (is_sparse) {
+                    // Handle sparse array: use CSC format (Compressed Sparse Column)
+                    // Initialize buffer to zeros (sparse arrays have implicit zeros)
+                    fill(map_buffer.begin(), map_buffer.end(), 0.0);
+                    
+                    mwIndex *ir = mxGetIr(map_arr);  // Row indices
+                    mwIndex *jc = mxGetJc(map_arr);  // Column pointers
+                    const double *pr = mxGetPr(map_arr);  // Non-zero values
+                    mwIndex nzmax = mxGetNzmax(map_arr);
+                    
+                    // For batch mode [N, nmaps, npix], sparse format is column-major
+                    // Each column corresponds to one pixel position
+                    // We need to map from MATLAB sparse indexing to our dense buffer layout
+                    if (is_batch_mode) {
+                        // For [N, nmaps, npix] in column-major: row index determines (ibatch, imap)
+                        // column index determines ipix
+                        for (mwIndex col = 0; col < npix; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                mwIndex row = ir[i];
+                                double val = pr[i];
+                                // Decompose row index: row = ibatch + imap * N
+                                size_t ibatch = row % N;
+                                size_t imap = row / N;
+                                if (imap < nmaps) {
+                                    // Convert to DUCC row-major: [N, nmaps, npix]
+                                    size_t idx_ducc = ibatch * nmaps * npix + imap * npix + col;
+                                    map_buffer[idx_ducc] = val;
+                                }
+                            }
+                        }
+                    } else {
+                        // For [nmaps, npix]: row index is imap, column index is ipix
+                        for (mwIndex col = 0; col < npix; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                mwIndex row = ir[i];
+                                double val = pr[i];
+                                if (row < nmaps) {
+                                    // Convert to DUCC row-major: [nmaps, npix]
+                                    size_t idx_ducc = row * npix + col;
+                                    map_buffer[idx_ducc] = val;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Dense array: use existing conversion logic
+                    const double *map_data = mxGetPr(map_arr);
+                    if (is_batch_mode) {
+                        // Convert from MATLAB column-major to DUCC row-major for all maps
+                        for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                            for (size_t imap = 0; imap < nmaps; ++imap) {
+                                for (size_t ipix = 0; ipix < npix; ++ipix) {
+                                    // MATLAB column-major: [N, nmaps, npix]
+                                    size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
+                                    // DUCC row-major: [N, nmaps, npix]
+                                    size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
+                                    map_buffer[idx_ducc] = map_data[idx_matlab];
+                                }
+                            }
+                        }
+                    } else {
+                        // Single map: [nmaps, npix]
+                        for (size_t imap = 0; imap < nmaps; ++imap) {
+                            for (size_t ipix = 0; ipix < npix; ++ipix) {
+                                size_t idx_matlab = imap + ipix * nmaps; // Column-major
+                                size_t idx_ducc = imap * npix + ipix; // Row-major
+                                map_buffer[idx_ducc] = map_data[idx_matlab];
+                            }
                         }
                     }
                 }
+            };
+            
+            if (is_batch_mode) {
+                // Batch mode: use batch C++ function
+                // Convert from MATLAB column-major (or sparse) to DUCC row-major for all maps
+                vector<double> map_buffer(N * nmaps * npix);
+                extract_map_data(map_buffer);
                 
                 // Create 3D views for batch processing (row-major)
                 array<size_t,3> map_shape = {N, nmaps, npix};
@@ -334,14 +438,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 vector<double> map_buffer(nmaps * npix);
                 vector<complex<double>> alm_buffer(ncomp * nalm_dim);
                 
-                // Reorder from MATLAB column-major to DUCC row-major
-                for (size_t imap = 0; imap < nmaps; ++imap) {
-                    for (size_t ipix = 0; ipix < npix; ++ipix) {
-                        size_t idx_matlab = imap + ipix * nmaps; // Column-major
-                        size_t idx_ducc = imap * npix + ipix; // Row-major
-                        map_buffer[idx_ducc] = map_data[idx_matlab];
-                    }
-                }
+                // Extract data (handles both sparse and dense)
+                extract_map_data(map_buffer);
                 
                 array<size_t,2> map_shape = {nmaps, npix};
                 cmav<double,2> map_view(map_buffer.data(), map_shape);
@@ -366,25 +464,91 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             }
             
         } else if (class_id == mxSINGLE_CLASS) {
-            const float *map_data = (const float *)mxGetData(map_arr);
             float *alm_real = (float *)mxGetData(alm_arr);
             float *alm_imag = (float *)mxGetImagData(alm_arr);
             
-            if (is_batch_mode) {
-                // Batch mode: use batch C++ function
-                // Convert from MATLAB column-major to DUCC row-major for all maps
-                vector<float> map_buffer(N * nmaps * npix);
-                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                    for (size_t imap = 0; imap < nmaps; ++imap) {
-                        for (size_t ipix = 0; ipix < npix; ++ipix) {
-                            // MATLAB column-major: [N, nmaps, npix]
-                            size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
-                            // DUCC row-major: [N, nmaps, npix]
-                            size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
-                            map_buffer[idx_ducc] = map_data[idx_matlab];
+            // Helper function to extract sparse or dense data into dense buffer (float version)
+            auto extract_map_data_float = [&](vector<float> &map_buffer) {
+                if (is_sparse) {
+                    // Handle sparse array: use CSC format (Compressed Sparse Column)
+                    // Initialize buffer to zeros (sparse arrays have implicit zeros)
+                    fill(map_buffer.begin(), map_buffer.end(), 0.0f);
+                    
+                    mwIndex *ir = mxGetIr(map_arr);  // Row indices
+                    mwIndex *jc = mxGetJc(map_arr);  // Column pointers
+                    const float *pr = (const float *)mxGetData(map_arr);  // Non-zero values
+                    mwIndex nzmax = mxGetNzmax(map_arr);
+                    
+                    // For batch mode [N, nmaps, npix], sparse format is column-major
+                    if (is_batch_mode) {
+                        // For [N, nmaps, npix] in column-major: row index determines (ibatch, imap)
+                        // column index determines ipix
+                        for (mwIndex col = 0; col < npix; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                mwIndex row = ir[i];
+                                float val = pr[i];
+                                // Decompose row index: row = ibatch + imap * N
+                                size_t ibatch = row % N;
+                                size_t imap = row / N;
+                                if (imap < nmaps) {
+                                    // Convert to DUCC row-major: [N, nmaps, npix]
+                                    size_t idx_ducc = ibatch * nmaps * npix + imap * npix + col;
+                                    map_buffer[idx_ducc] = val;
+                                }
+                            }
+                        }
+                    } else {
+                        // For [nmaps, npix]: row index is imap, column index is ipix
+                        for (mwIndex col = 0; col < npix; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                mwIndex row = ir[i];
+                                float val = pr[i];
+                                if (row < nmaps) {
+                                    // Convert to DUCC row-major: [nmaps, npix]
+                                    size_t idx_ducc = row * npix + col;
+                                    map_buffer[idx_ducc] = val;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Dense array: use existing conversion logic
+                    const float *map_data = (const float *)mxGetData(map_arr);
+                    if (is_batch_mode) {
+                        // Convert from MATLAB column-major to DUCC row-major for all maps
+                        for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                            for (size_t imap = 0; imap < nmaps; ++imap) {
+                                for (size_t ipix = 0; ipix < npix; ++ipix) {
+                                    // MATLAB column-major: [N, nmaps, npix]
+                                    size_t idx_matlab = ibatch + imap * N + ipix * N * nmaps;
+                                    // DUCC row-major: [N, nmaps, npix]
+                                    size_t idx_ducc = ibatch * nmaps * npix + imap * npix + ipix;
+                                    map_buffer[idx_ducc] = map_data[idx_matlab];
+                                }
+                            }
+                        }
+                    } else {
+                        // Single map: [nmaps, npix]
+                        for (size_t imap = 0; imap < nmaps; ++imap) {
+                            for (size_t ipix = 0; ipix < npix; ++ipix) {
+                                size_t idx_matlab = imap + ipix * nmaps; // Column-major
+                                size_t idx_ducc = imap * npix + ipix; // Row-major
+                                map_buffer[idx_ducc] = map_data[idx_matlab];
+                            }
                         }
                     }
                 }
+            };
+            
+            if (is_batch_mode) {
+                // Batch mode: use batch C++ function
+                // Convert from MATLAB column-major (or sparse) to DUCC row-major for all maps
+                vector<float> map_buffer(N * nmaps * npix);
+                extract_map_data_float(map_buffer);
                 
                 // Create 3D views for batch processing (row-major)
                 array<size_t,3> map_shape = {N, nmaps, npix};
@@ -415,14 +579,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 vector<float> map_buffer(nmaps * npix);
                 vector<complex<float>> alm_buffer(ncomp * nalm_dim);
                 
-                // Reorder from MATLAB column-major to DUCC row-major
-                for (size_t imap = 0; imap < nmaps; ++imap) {
-                    for (size_t ipix = 0; ipix < npix; ++ipix) {
-                        size_t idx_matlab = imap + ipix * nmaps; // Column-major
-                        size_t idx_ducc = imap * npix + ipix; // Row-major
-                        map_buffer[idx_ducc] = map_data[idx_matlab];
-                    }
-                }
+                // Extract data (handles both sparse and dense)
+                extract_map_data_float(map_buffer);
                 
                 array<size_t,2> map_shape = {nmaps, npix};
                 cmav<float,2> map_view(map_buffer.data(), map_shape);

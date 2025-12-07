@@ -14,8 +14,9 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
 %
 %   Parameters
 %   ----------
-%   map : numeric array (real)
-%       Input map data, shape [nmaps, npix]
+%   map : numeric array (real), dense or sparse
+%       Input map data, shape [nmaps, npix] or [N, nmaps, npix] for batch mode.
+%       Sparse arrays are supported.
 %   lmax : int
 %       Maximum multipole order l
 %   spin : int
@@ -53,7 +54,7 @@ function alm = adjoint_synthesis(map, lmax, spin, theta, nphi, phi0, ringstart, 
 %   See also: ducc0.sht.synthesis, ducc0.sht.adjoint_synthesis_2d
 
     p = inputParser;
-    addRequired(p, 'map', @(x) isnumeric(x) && isreal(x));
+    addRequired(p, 'map', @(x) isnumeric(x) && isreal(x));  % Accepts both dense and sparse
     addRequired(p, 'lmax', @(x) isnumeric(x) && isscalar(x));
     addRequired(p, 'spin', @(x) isnumeric(x) && isscalar(x));
     addRequired(p, 'theta', @(x) isnumeric(x) && isvector(x));

@@ -7,12 +7,13 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %
 %   Parameters
 %   ----------
-%   map : numeric array (real)
-%       Input maps. Can be either:
-%       - Single map: shape [nmaps, npix] where nmaps is either 1 (for spin-0)
-%         or 2 (for spin>0 fields), and npix is the number of pixels.
-%       - Multiple maps: shape [N, ncomp*npix] where N is the number of maps,
-%         ncomp is 1 (spin-0) or 2 (spin>0), and npix is the number of pixels.
+   %   map : numeric array (real), dense or sparse
+   %       Input maps. Can be either:
+   %       - Single map: shape [nmaps, npix] where nmaps is either 1 (for spin-0)
+   %         or 2 (for spin>0 fields), and npix is the number of pixels.
+   %       - Multiple maps: shape [N, ncomp*npix] where N is the number of maps,
+   %         ncomp is 1 (spin-0) or 2 (spin>0), and npix is the number of pixels.
+   %       Sparse arrays are supported and sparsity is preserved throughout.
 %   spin : int
 %       Field spin (0, 1, or 2)
 %   map_info : struct
@@ -49,13 +50,16 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
 %   See also: alm2map, create_map_info, create_alm_info
 
     p = inputParser;
-    addRequired(p, 'map', @(x) isnumeric(x) && isreal(x));
+    addRequired(p, 'map', @(x) isnumeric(x) && isreal(x));  % Accepts both dense and sparse
     addRequired(p, 'spin', @(x) isnumeric(x) && isscalar(x));
     addRequired(p, 'map_info', @(x) isstruct(x));
     addRequired(p, 'alm_info', @(x) isstruct(x));
     addParameter(p, 'n_iter', 3, @(x) isnumeric(x) && isscalar(x) && x >= 0);
     addParameter(p, 'nthreads', 0, @(x) isnumeric(x) && isscalar(x));
     parse(p, map, spin, map_info, alm_info, varargin{:});
+    
+    % Detect if input is sparse
+    is_sparse_input = issparse(map);
     
     n_iter = int32(p.Results.n_iter);
     nthreads = int32(p.Results.nthreads);
@@ -119,7 +123,12 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         if i == 1
             % Initialize with correct size after padding
             npix_padded = size(map_single_padded, 2);
-            map_padded = zeros(N, ncomp, npix_padded);
+            % Preserve sparsity in initialization
+            if is_sparse_input
+                map_padded = sparse(N, ncomp, npix_padded);
+            else
+                map_padded = zeros(N, ncomp, npix_padded);
+            end
         end
         map_padded(i, :, :) = map_single_padded;
     end
@@ -140,7 +149,12 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
     
     % Convert ring weights to ringfactor if needed
     % For map2alm (adjoint_synthesis), we need to multiply by weights
-    map_weighted = zeros(size(map));
+    % Preserve sparsity in initialization
+    if is_sparse_input
+        map_weighted = sparse(size(map));
+    else
+        map_weighted = zeros(size(map));
+    end
     for i = 1:N
         % Extract single map [ncomp, npix] without removing dimensions
         map_single = reshape(map(i, :, :), [ncomp, size(map, 3)]);
