@@ -416,74 +416,93 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process row-by-row to avoid huge dense buffers
+                // For sparse arrays in batch mode, process only non-zero maps together
                 if (is_sparse) {
-                    // Process each map separately to avoid creating huge dense buffer
-                    // Extract sparse data row by row
+                    // Extract sparse data and identify non-zero rows (maps)
                     mwIndex *ir = mxGetIr(map_arr);  // Row indices
                     mwIndex *jc = mxGetJc(map_arr);  // Column pointers
                     const double *pr = mxGetPr(map_arr);  // Non-zero values
+                    mwIndex nzmax = mxGetNzmax(map_arr);
                     
-                    // Allocate output buffer for all maps
-                    vector<complex<double>> alm_buffer_total(N * ncomp * nalm_dim, 0.0);
+                    // Find which rows (maps) have non-zero elements
+                    vector<bool> row_has_data(N, false);
+                    vector<size_t> non_zero_row_indices;
+                    non_zero_row_indices.reserve(N);  // Reserve space, but likely much fewer
                     
-                    // Process each map (row) separately
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        // Extract this row's sparse data into a small dense buffer for one map
-                        vector<double> map_single_buffer(nmaps * npix, 0.0);
+                    size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                    for (mwIndex col = 0; col < npix_total; ++col) {
+                        mwIndex row_start = jc[col];
+                        mwIndex row_end = jc[col + 1];
+                        for (mwIndex i = row_start; i < row_end; ++i) {
+                            mwIndex row = ir[i];
+                            if (row < (mwIndex)N && !row_has_data[row]) {
+                                row_has_data[row] = true;
+                                non_zero_row_indices.push_back(row);
+                            }
+                        }
+                    }
+                    
+                    // Sort row indices for efficient processing
+                    sort(non_zero_row_indices.begin(), non_zero_row_indices.end());
+                    size_t N_nonzero = non_zero_row_indices.size();
+                    
+                    if (N_nonzero == 0) {
+                        // All maps are zero - output zeros
+                        // Output is already initialized to zeros, so just return
+                    } else {
+                        // Extract only non-zero maps into batch buffer
+                        vector<double> map_batch_buffer(N_nonzero * nmaps * npix, 0.0);
                         
-                        // Extract non-zero elements for this row (batch)
-                        // For sparse [N, ncomp*npix], columns represent flattened pixel positions
-                        size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                        // Extract sparse data for non-zero rows only
                         for (mwIndex col = 0; col < npix_total; ++col) {
                             mwIndex row_start = jc[col];
                             mwIndex row_end = jc[col + 1];
                             for (mwIndex i = row_start; i < row_end; ++i) {
-                                if (ir[i] == (mwIndex)ibatch) {
-                                    // This column belongs to current row (batch)
-                                    // Column j in sparse [N, ncomp*npix] represents pixel j in flattened format
-                                    // Map to [nmaps, npix] format: component = j/npix, pixel = j%npix
+                                mwIndex row = ir[i];
+                                double val = pr[i];
+                                
+                                // Find position in non-zero batch
+                                auto it = lower_bound(non_zero_row_indices.begin(), non_zero_row_indices.end(), row);
+                                if (it != non_zero_row_indices.end() && *it == row) {
+                                    size_t batch_idx = distance(non_zero_row_indices.begin(), it);
+                                    
+                                    // Column j represents pixel in flattened format
+                                    // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
                                     size_t imap = col / npix;
                                     size_t ipix = col % npix;
                                     if (imap < nmaps && ipix < npix) {
-                                        size_t idx_ducc = imap * npix + ipix;
-                                        map_single_buffer[idx_ducc] = pr[i];
+                                        // Convert to batch buffer: [N_nonzero, nmaps, npix]
+                                        size_t idx_batch = batch_idx * nmaps * npix + imap * npix + ipix;
+                                        map_batch_buffer[idx_batch] = val;
                                     }
                                 }
                             }
                         }
                         
-                        // Process this single map
-                        array<size_t,2> map_single_shape = {nmaps, npix};
-                        cmav<double,2> map_single_view(map_single_buffer.data(), map_single_shape);
+                        // Process all non-zero maps together in batch
+                        array<size_t,3> map_batch_shape = {N_nonzero, nmaps, npix};
+                        cmav<double,3> map_batch_view(map_batch_buffer.data(), map_batch_shape);
                         
-                        vector<complex<double>> alm_single_buffer(ncomp * nalm_dim);
-                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
-                        vmav<complex<double>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
+                        vector<complex<double>> alm_batch_buffer(N_nonzero * ncomp * nalm_dim);
+                        array<size_t,3> alm_batch_shape = {N_nonzero, ncomp, nalm_dim};
+                        vmav<complex<double>,3> alm_batch_view(alm_batch_buffer.data(), alm_batch_shape);
                         
-                        // Perform adjoint synthesis for this single map
-                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
-                                         theta_view, nphi_view, phi0_view, ringstart_view,
-                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        // Call batch function for non-zero maps
+                        adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
+                                               theta_view, nphi_view, phi0_view, ringstart_view,
+                                               ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                         
-                        // Copy result to batch output
-                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_single = icomp * nalm_dim + ialm;
-                                size_t idx_batch = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                alm_buffer_total[idx_batch] = alm_single_buffer[idx_single];
-                            }
-                        }
-                    }
-                    
-                    // Copy from buffer to MATLAB (column-major)
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                                alm_real[idx_matlab] = alm_buffer_total[idx_buffer].real();
-                                alm_imag[idx_matlab] = alm_buffer_total[idx_buffer].imag();
+                        // Copy results back to output, mapping non-zero batch indices to original row indices
+                        // Output is initialized to zeros, so zero rows stay zero
+                        for (size_t i = 0; i < N_nonzero; ++i) {
+                            size_t orig_row = non_zero_row_indices[i];
+                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                    size_t idx_batch = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                    size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
+                                    alm_real[idx_matlab] = alm_batch_buffer[idx_batch].real();
+                                    alm_imag[idx_matlab] = alm_batch_buffer[idx_batch].imag();
+                                }
                             }
                         }
                     }
@@ -630,70 +649,93 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process row-by-row to avoid huge dense buffers
+                // For sparse arrays in batch mode, process only non-zero maps together
                 if (is_sparse) {
-                    // Process each map separately to avoid creating huge dense buffer
+                    // Extract sparse data and identify non-zero rows (maps)
                     mwIndex *ir = mxGetIr(map_arr);  // Row indices
                     mwIndex *jc = mxGetJc(map_arr);  // Column pointers
                     const float *pr = (const float *)mxGetData(map_arr);  // Non-zero values
+                    mwIndex nzmax = mxGetNzmax(map_arr);
                     
-                    // Allocate output buffer for all maps
-                    vector<complex<float>> alm_buffer_total(N * ncomp * nalm_dim, 0.0f);
+                    // Find which rows (maps) have non-zero elements
+                    vector<bool> row_has_data(N, false);
+                    vector<size_t> non_zero_row_indices;
+                    non_zero_row_indices.reserve(N);  // Reserve space, but likely much fewer
                     
-                    // Process each map (row) separately
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        // Extract this row's sparse data into a small dense buffer for one map
-                        vector<float> map_single_buffer(nmaps * npix, 0.0f);
+                    size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                    for (mwIndex col = 0; col < npix_total; ++col) {
+                        mwIndex row_start = jc[col];
+                        mwIndex row_end = jc[col + 1];
+                        for (mwIndex i = row_start; i < row_end; ++i) {
+                            mwIndex row = ir[i];
+                            if (row < (mwIndex)N && !row_has_data[row]) {
+                                row_has_data[row] = true;
+                                non_zero_row_indices.push_back(row);
+                            }
+                        }
+                    }
+                    
+                    // Sort row indices for efficient processing
+                    sort(non_zero_row_indices.begin(), non_zero_row_indices.end());
+                    size_t N_nonzero = non_zero_row_indices.size();
+                    
+                    if (N_nonzero == 0) {
+                        // All maps are zero - output zeros
+                        // Output is already initialized to zeros, so just return
+                    } else {
+                        // Extract only non-zero maps into batch buffer
+                        vector<float> map_batch_buffer(N_nonzero * nmaps * npix, 0.0f);
                         
-                        // Extract non-zero elements for this row (batch)
-                        size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                        // Extract sparse data for non-zero rows only
                         for (mwIndex col = 0; col < npix_total; ++col) {
                             mwIndex row_start = jc[col];
                             mwIndex row_end = jc[col + 1];
                             for (mwIndex i = row_start; i < row_end; ++i) {
-                                if (ir[i] == (mwIndex)ibatch) {
-                                    // This column belongs to current row (batch)
+                                mwIndex row = ir[i];
+                                float val = pr[i];
+                                
+                                // Find position in non-zero batch
+                                auto it = lower_bound(non_zero_row_indices.begin(), non_zero_row_indices.end(), row);
+                                if (it != non_zero_row_indices.end() && *it == row) {
+                                    size_t batch_idx = distance(non_zero_row_indices.begin(), it);
+                                    
+                                    // Column j represents pixel in flattened format
+                                    // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
                                     size_t imap = col / npix;
                                     size_t ipix = col % npix;
                                     if (imap < nmaps && ipix < npix) {
-                                        size_t idx_ducc = imap * npix + ipix;
-                                        map_single_buffer[idx_ducc] = pr[i];
+                                        // Convert to batch buffer: [N_nonzero, nmaps, npix]
+                                        size_t idx_batch = batch_idx * nmaps * npix + imap * npix + ipix;
+                                        map_batch_buffer[idx_batch] = val;
                                     }
                                 }
                             }
                         }
                         
-                        // Process this single map
-                        array<size_t,2> map_single_shape = {nmaps, npix};
-                        cmav<float,2> map_single_view(map_single_buffer.data(), map_single_shape);
+                        // Process all non-zero maps together in batch
+                        array<size_t,3> map_batch_shape = {N_nonzero, nmaps, npix};
+                        cmav<float,3> map_batch_view(map_batch_buffer.data(), map_batch_shape);
                         
-                        vector<complex<float>> alm_single_buffer(ncomp * nalm_dim);
-                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
-                        vmav<complex<float>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
+                        vector<complex<float>> alm_batch_buffer(N_nonzero * ncomp * nalm_dim);
+                        array<size_t,3> alm_batch_shape = {N_nonzero, ncomp, nalm_dim};
+                        vmav<complex<float>,3> alm_batch_view(alm_batch_buffer.data(), alm_batch_shape);
                         
-                        // Perform adjoint synthesis for this single map
-                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
-                                         theta_view, nphi_view, phi0_view, ringstart_view,
-                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        // Call batch function for non-zero maps
+                        adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
+                                               theta_view, nphi_view, phi0_view, ringstart_view,
+                                               ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                         
-                        // Copy result to batch output
-                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_single = icomp * nalm_dim + ialm;
-                                size_t idx_batch = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                alm_buffer_total[idx_batch] = alm_single_buffer[idx_single];
-                            }
-                        }
-                    }
-                    
-                    // Copy from buffer to MATLAB (column-major)
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                                alm_real[idx_matlab] = alm_buffer_total[idx_buffer].real();
-                                alm_imag[idx_matlab] = alm_buffer_total[idx_buffer].imag();
+                        // Copy results back to output, mapping non-zero batch indices to original row indices
+                        // Output is initialized to zeros, so zero rows stay zero
+                        for (size_t i = 0; i < N_nonzero; ++i) {
+                            size_t orig_row = non_zero_row_indices[i];
+                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                    size_t idx_batch = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                    size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
+                                    alm_real[idx_matlab] = alm_batch_buffer[idx_batch].real();
+                                    alm_imag[idx_matlab] = alm_batch_buffer[idx_batch].imag();
+                                }
                             }
                         }
                     }
