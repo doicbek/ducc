@@ -186,16 +186,28 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         
         if (is_sparse) {
             // For sparse arrays, MATLAB always presents them as 2D
-            // We need to infer if it's batch mode based on dimensions
-            // If dims[0] is divisible by nmaps and greater than nmaps, it's likely batch mode
-            if (dims[0] > nmaps && (dims[0] % nmaps == 0)) {
-                // Likely batch mode: [N, nmaps, npix] represented as (N*nmaps) x npix
+            // For map2alm, sparse arrays come as [N, ncomp*npix] for batch mode
+            // or [ncomp, npix] for single map mode
+            // We need to check based on the second dimension
+            size_t expected_npix_total = nmaps * npix_expected;  // This will be set from context
+            // Actually, we need to infer from dimensions and N_batch parameter
+            // For now, check if second dimension matches ncomp*npix pattern
+            if (dims[0] > 1 && dims[1] >= nmaps) {
+                // Likely batch mode: [N, ncomp*npix] where N = dims[0]
+                // Check if second dim is approximately ncomp*npix (we'll determine npix from it)
+                // For batch mode sparse, we have [N, ncomp*npix]
                 is_batch_mode = true;
-                N = dims[0] / nmaps;
+                N = dims[0];
+                // npix_total = ncomp * npix, so npix = npix_total / ncomp
+                size_t npix_total = dims[1];
+                if (npix_total % nmaps != 0) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
+                        "sparse map second dimension must be divisible by nmaps for batch mode");
+                }
+                npix = npix_total / nmaps;
                 nmaps_in = nmaps;
-                npix = dims[1];
             } else if (dims[0] == nmaps) {
-                // Single map mode: [nmaps, npix] (not batch)
+                // Single map mode: [nmaps, npix]
                 nmaps_in = dims[0];
                 npix = dims[1];
                 if (nmaps_in != nmaps) {
@@ -404,32 +416,105 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // Batch mode: use batch C++ function
-                // Convert from MATLAB column-major (or sparse) to DUCC row-major for all maps
-                vector<double> map_buffer(N * nmaps * npix);
-                extract_map_data(map_buffer);
-                
-                // Create 3D views for batch processing (row-major)
-                array<size_t,3> map_shape = {N, nmaps, npix};
-                cmav<double,3> map_view(map_buffer.data(), map_shape);
-                
-                vector<complex<double>> alm_buffer(N * ncomp * nalm_dim);
-                array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
-                vmav<complex<double>,3> alm_view(alm_buffer.data(), alm_shape);
-                
-                // Call batch function (reuses setup internally)
-                adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
-                                       theta_view, nphi_view, phi0_view, ringstart_view,
-                                       ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-                
-                // Copy from buffer to MATLAB (column-major)
-                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                            size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                            size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                // For sparse arrays in batch mode, process row-by-row to avoid huge dense buffers
+                if (is_sparse) {
+                    // Process each map separately to avoid creating huge dense buffer
+                    // Extract sparse data row by row
+                    mwIndex *ir = mxGetIr(map_arr);  // Row indices
+                    mwIndex *jc = mxGetJc(map_arr);  // Column pointers
+                    const double *pr = mxGetPr(map_arr);  // Non-zero values
+                    
+                    // Allocate output buffer for all maps
+                    vector<complex<double>> alm_buffer_total(N * ncomp * nalm_dim, 0.0);
+                    
+                    // Process each map (row) separately
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        // Extract this row's sparse data into a small dense buffer for one map
+                        vector<double> map_single_buffer(nmaps * npix, 0.0);
+                        
+                        // Extract non-zero elements for this row (batch)
+                        // For sparse [N, ncomp*npix], columns represent flattened pixel positions
+                        size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                        for (mwIndex col = 0; col < npix_total; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                if (ir[i] == (mwIndex)ibatch) {
+                                    // This column belongs to current row (batch)
+                                    // Column j in sparse [N, ncomp*npix] represents pixel j in flattened format
+                                    // Map to [nmaps, npix] format: component = j/npix, pixel = j%npix
+                                    size_t imap = col / npix;
+                                    size_t ipix = col % npix;
+                                    if (imap < nmaps && ipix < npix) {
+                                        size_t idx_ducc = imap * npix + ipix;
+                                        map_single_buffer[idx_ducc] = pr[i];
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Process this single map
+                        array<size_t,2> map_single_shape = {nmaps, npix};
+                        cmav<double,2> map_single_view(map_single_buffer.data(), map_single_shape);
+                        
+                        vector<complex<double>> alm_single_buffer(ncomp * nalm_dim);
+                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
+                        vmav<complex<double>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
+                        
+                        // Perform adjoint synthesis for this single map
+                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
+                                         theta_view, nphi_view, phi0_view, ringstart_view,
+                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        
+                        // Copy result to batch output
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_single = icomp * nalm_dim + ialm;
+                                size_t idx_batch = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                alm_buffer_total[idx_batch] = alm_single_buffer[idx_single];
+                            }
+                        }
+                    }
+                    
+                    // Copy from buffer to MATLAB (column-major)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer_total[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer_total[idx_buffer].imag();
+                            }
+                        }
+                    }
+                } else {
+                    // Dense batch mode: use batch C++ function
+                    // Convert from MATLAB column-major to DUCC row-major for all maps
+                    vector<double> map_buffer(N * nmaps * npix);
+                    extract_map_data(map_buffer);
+                    
+                    // Create 3D views for batch processing (row-major)
+                    array<size_t,3> map_shape = {N, nmaps, npix};
+                    cmav<double,3> map_view(map_buffer.data(), map_shape);
+                    
+                    vector<complex<double>> alm_buffer(N * ncomp * nalm_dim);
+                    array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                    vmav<complex<double>,3> alm_view(alm_buffer.data(), alm_shape);
+                    
+                    // Call batch function (reuses setup internally)
+                    adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                           theta_view, nphi_view, phi0_view, ringstart_view,
+                                           ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                    
+                    // Copy from buffer to MATLAB (column-major)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                            }
                         }
                     }
                 }
@@ -545,32 +630,101 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // Batch mode: use batch C++ function
-                // Convert from MATLAB column-major (or sparse) to DUCC row-major for all maps
-                vector<float> map_buffer(N * nmaps * npix);
-                extract_map_data_float(map_buffer);
-                
-                // Create 3D views for batch processing (row-major)
-                array<size_t,3> map_shape = {N, nmaps, npix};
-                cmav<float,3> map_view(map_buffer.data(), map_shape);
-                
-                vector<complex<float>> alm_buffer(N * ncomp * nalm_dim);
-                array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
-                vmav<complex<float>,3> alm_view(alm_buffer.data(), alm_shape);
-                
-                // Call batch function (reuses setup internally)
-                adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
-                                       theta_view, nphi_view, phi0_view, ringstart_view,
-                                       ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-                
-                // Copy from buffer to MATLAB (column-major)
-                for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                            size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                            size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                // For sparse arrays in batch mode, process row-by-row to avoid huge dense buffers
+                if (is_sparse) {
+                    // Process each map separately to avoid creating huge dense buffer
+                    mwIndex *ir = mxGetIr(map_arr);  // Row indices
+                    mwIndex *jc = mxGetJc(map_arr);  // Column pointers
+                    const float *pr = (const float *)mxGetData(map_arr);  // Non-zero values
+                    
+                    // Allocate output buffer for all maps
+                    vector<complex<float>> alm_buffer_total(N * ncomp * nalm_dim, 0.0f);
+                    
+                    // Process each map (row) separately
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        // Extract this row's sparse data into a small dense buffer for one map
+                        vector<float> map_single_buffer(nmaps * npix, 0.0f);
+                        
+                        // Extract non-zero elements for this row (batch)
+                        size_t npix_total = nmaps * npix;  // Total columns in sparse array
+                        for (mwIndex col = 0; col < npix_total; ++col) {
+                            mwIndex row_start = jc[col];
+                            mwIndex row_end = jc[col + 1];
+                            for (mwIndex i = row_start; i < row_end; ++i) {
+                                if (ir[i] == (mwIndex)ibatch) {
+                                    // This column belongs to current row (batch)
+                                    size_t imap = col / npix;
+                                    size_t ipix = col % npix;
+                                    if (imap < nmaps && ipix < npix) {
+                                        size_t idx_ducc = imap * npix + ipix;
+                                        map_single_buffer[idx_ducc] = pr[i];
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Process this single map
+                        array<size_t,2> map_single_shape = {nmaps, npix};
+                        cmav<float,2> map_single_view(map_single_buffer.data(), map_single_shape);
+                        
+                        vector<complex<float>> alm_single_buffer(ncomp * nalm_dim);
+                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
+                        vmav<complex<float>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
+                        
+                        // Perform adjoint synthesis for this single map
+                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
+                                         theta_view, nphi_view, phi0_view, ringstart_view,
+                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        
+                        // Copy result to batch output
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_single = icomp * nalm_dim + ialm;
+                                size_t idx_batch = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                alm_buffer_total[idx_batch] = alm_single_buffer[idx_single];
+                            }
+                        }
+                    }
+                    
+                    // Copy from buffer to MATLAB (column-major)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer_total[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer_total[idx_buffer].imag();
+                            }
+                        }
+                    }
+                } else {
+                    // Dense batch mode: use batch C++ function
+                    // Convert from MATLAB column-major to DUCC row-major for all maps
+                    vector<float> map_buffer(N * nmaps * npix);
+                    extract_map_data_float(map_buffer);
+                    
+                    // Create 3D views for batch processing (row-major)
+                    array<size_t,3> map_shape = {N, nmaps, npix};
+                    cmav<float,3> map_view(map_buffer.data(), map_shape);
+                    
+                    vector<complex<float>> alm_buffer(N * ncomp * nalm_dim);
+                    array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                    vmav<complex<float>,3> alm_view(alm_buffer.data(), alm_shape);
+                    
+                    // Call batch function (reuses setup internally)
+                    adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                           theta_view, nphi_view, phi0_view, ringstart_view,
+                                           ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                    
+                    // Copy from buffer to MATLAB (column-major)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
+                            }
                         }
                     }
                 }
