@@ -188,22 +188,17 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             // For sparse arrays, MATLAB always presents them as 2D
             // For map2alm, sparse arrays come as [N, ncomp*npix] for batch mode
             // or [ncomp, npix] for single map mode
-            // We need to check based on the second dimension
-            size_t expected_npix_total = nmaps * npix_expected;  // This will be set from context
-            // Actually, we need to infer from dimensions and N_batch parameter
-            // For now, check if second dimension matches ncomp*npix pattern
+            // Infer format from dimensions and check if divisible by nmaps
             if (dims[0] > 1 && dims[1] >= nmaps) {
                 // Likely batch mode: [N, ncomp*npix] where N = dims[0]
-                // Check if second dim is approximately ncomp*npix (we'll determine npix from it)
-                // For batch mode sparse, we have [N, ncomp*npix]
-                is_batch_mode = true;
-                N = dims[0];
                 // npix_total = ncomp * npix, so npix = npix_total / ncomp
                 size_t npix_total = dims[1];
                 if (npix_total % nmaps != 0) {
                     mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:InputError", 
                         "sparse map second dimension must be divisible by nmaps for batch mode");
                 }
+                is_batch_mode = true;
+                N = dims[0];
                 npix = npix_total / nmaps;
                 nmaps_in = nmaps;
             } else if (dims[0] == nmaps) {
