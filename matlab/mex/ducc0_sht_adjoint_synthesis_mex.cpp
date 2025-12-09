@@ -38,6 +38,8 @@
 #include <string>
 #include <array>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -264,6 +266,34 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         size_t nalm_expected = ((mmax+1)*(mmax+2))/2 + (mmax+1)*(lmax-mmax);
         size_t nalm_dim = min_almdim(lmax, mstart, lstride);
         
+        // Validate array sizes to prevent overflow and excessive memory allocation
+        // Check for potential overflow in size calculations
+        const size_t MAX_SAFE_SIZE = std::numeric_limits<size_t>::max() / (2 * sizeof(double)); // Conservative limit
+        if (npix > MAX_SAFE_SIZE) {
+            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                "npix (%zu) exceeds maximum safe size (%zu). Input map may be too large.", 
+                npix, MAX_SAFE_SIZE);
+        }
+        if (nalm_dim > MAX_SAFE_SIZE) {
+            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                "nalm_dim (%zu) exceeds maximum safe size (%zu). lmax (%zu) may be too large.", 
+                nalm_dim, MAX_SAFE_SIZE, lmax);
+        }
+        if (N > MAX_SAFE_SIZE) {
+            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                "N (%zu) exceeds maximum safe size (%zu). Batch size may be too large.", 
+                N, MAX_SAFE_SIZE);
+        }
+        
+        // Check output array size before allocation
+        size_t output_size = N * ncomp * nalm_dim;
+        if (output_size > MAX_SAFE_SIZE) {
+            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                "Output array size (%zu = %zu * %zu * %zu) exceeds maximum safe size (%zu). "
+                "Consider reducing lmax, batch size, or processing in chunks.", 
+                output_size, N, ncomp, nalm_dim, MAX_SAFE_SIZE);
+        }
+        
         // Get ring parameter arrays
         vector<double> theta(nrings);
         vector<size_t> nphi(nrings);
@@ -313,9 +343,21 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             if (is_batch_mode) {
                 mwSize alm_dims[3] = {N, ncomp, nalm_dim};
                 alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                if (alm_arr == nullptr) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                        "Failed to create output array: dimensions [%zu, %zu, %zu]. "
+                        "Not enough memory available. Consider reducing lmax or batch size.",
+                        N, ncomp, nalm_dim);
+                }
             } else {
                 mwSize alm_dims[2] = {ncomp, nalm_dim};
                 alm_arr = mxCreateNumericArray(2, alm_dims, class_id, mxCOMPLEX);
+                if (alm_arr == nullptr) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                        "Failed to create output array: dimensions [%zu, %zu]. "
+                        "Not enough memory available. Consider reducing lmax (currently %zu).",
+                        ncomp, nalm_dim, lmax);
+                }
             }
         }
         
@@ -460,10 +502,24 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         // All maps are zero - create zero output array
                         mwSize alm_dims[3] = {N, ncomp, nalm_dim};
                         alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        if (alm_arr == nullptr) {
+                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                                "Failed to create output array: dimensions [%zu, %zu, %zu]. "
+                                "Not enough memory available. Consider reducing lmax or batch size.",
+                                N, ncomp, nalm_dim);
+                        }
                         // Array is already initialized to zeros
                     } else {
                         // Extract only non-zero maps into batch buffer
-                        vector<double> map_batch_buffer(N_nonzero * nmaps * npix, 0.0);
+                        vector<double> map_batch_buffer;
+                        try {
+                            map_batch_buffer.resize(N_nonzero * nmaps * npix, 0.0);
+                        } catch (const std::bad_alloc &e) {
+                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                                "Failed to allocate map_batch_buffer: size = %zu * %zu * %zu = %zu elements. "
+                                "Not enough memory available. Consider processing fewer maps or reducing npix/lmax.",
+                                N_nonzero, nmaps, npix, N_nonzero * nmaps * npix);
+                        }
                         
                         // Extract sparse data for non-zero rows only
                         for (mwIndex col = 0; col < npix_total; ++col) {
@@ -495,7 +551,15 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         array<size_t,3> map_batch_shape = {N_nonzero, nmaps, npix};
                         cmav<double,3> map_batch_view(map_batch_buffer.data(), map_batch_shape);
                         
-                        vector<complex<double>> alm_batch_buffer(N_nonzero * ncomp * nalm_dim);
+                        vector<complex<double>> alm_batch_buffer;
+                        try {
+                            alm_batch_buffer.resize(N_nonzero * ncomp * nalm_dim);
+                        } catch (const std::bad_alloc &e) {
+                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                                "Failed to allocate alm_batch_buffer: size = %zu * %zu * %zu = %zu elements. "
+                                "Not enough memory available. Consider reducing lmax or processing fewer maps.",
+                                N_nonzero, ncomp, nalm_dim, N_nonzero * ncomp * nalm_dim);
+                        }
                         array<size_t,3> alm_batch_shape = {N_nonzero, ncomp, nalm_dim};
                         vmav<complex<double>,3> alm_batch_view(alm_batch_buffer.data(), alm_batch_shape);
                         
@@ -507,6 +571,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         // Now create output array AFTER processing (to avoid memory error if processing fails)
                         mwSize alm_dims[3] = {N, ncomp, nalm_dim};
                         alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        if (alm_arr == nullptr) {
+                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                                "Failed to create output array: dimensions [%zu, %zu, %zu]. "
+                                "Not enough memory available. Consider reducing lmax or batch size.",
+                                N, ncomp, nalm_dim);
+                        }
                         alm_real = mxGetPr(alm_arr);
                         alm_imag = mxGetPi(alm_arr);
                         
@@ -527,14 +597,30 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 } else {
                     // Dense batch mode: use batch C++ function
                     // Convert from MATLAB column-major to DUCC row-major for all maps
-                    vector<double> map_buffer(N * nmaps * npix);
+                    vector<double> map_buffer;
+                    try {
+                        map_buffer.resize(N * nmaps * npix);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate map_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider processing fewer maps or reducing npix.",
+                            N, nmaps, npix, N * nmaps * npix);
+                    }
                     extract_map_data(map_buffer);
                     
                     // Create 3D views for batch processing (row-major)
                     array<size_t,3> map_shape = {N, nmaps, npix};
                     cmav<double,3> map_view(map_buffer.data(), map_shape);
                     
-                    vector<complex<double>> alm_buffer(N * ncomp * nalm_dim);
+                    vector<complex<double>> alm_buffer;
+                    try {
+                        alm_buffer.resize(N * ncomp * nalm_dim);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate alm_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing lmax or batch size.",
+                            N, ncomp, nalm_dim, N * ncomp * nalm_dim);
+                    }
                     array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
                     vmav<complex<double>,3> alm_view(alm_buffer.data(), alm_shape);
                     
@@ -557,8 +643,24 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
             } else {
                 // Single mode: use regular function
-                vector<double> map_buffer(nmaps * npix);
-                vector<complex<double>> alm_buffer(ncomp * nalm_dim);
+                vector<double> map_buffer;
+                try {
+                    map_buffer.resize(nmaps * npix);
+                } catch (const std::bad_alloc &e) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                        "Failed to allocate map_buffer: size = %zu * %zu = %zu elements. "
+                        "Not enough memory available. Consider reducing npix.",
+                        nmaps, npix, nmaps * npix);
+                }
+                vector<complex<double>> alm_buffer;
+                try {
+                    alm_buffer.resize(ncomp * nalm_dim);
+                } catch (const std::bad_alloc &e) {
+                    mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                        "Failed to allocate alm_buffer: size = %zu * %zu = %zu elements. "
+                        "Not enough memory available. Consider reducing lmax (currently %zu).",
+                        ncomp, nalm_dim, ncomp * nalm_dim, lmax);
+                }
                 
                 // Extract data (handles both sparse and dense)
                 extract_map_data(map_buffer);
