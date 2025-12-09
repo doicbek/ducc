@@ -468,129 +468,92 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process only non-zero maps together
+                // For sparse arrays in batch mode, process one map at a time to respect sparsity
                 if (is_sparse) {
-                    // Extract sparse data and identify non-zero rows (maps)
+                    // Create output array first
+                    mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                    alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                    if (alm_arr == nullptr) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to create output array: dimensions [%zu, %zu, %zu]. "
+                            "Not enough memory available. Consider reducing lmax or batch size.",
+                            N, ncomp, nalm_dim);
+                    }
+                    alm_real = mxGetPr(alm_arr);
+                    alm_imag = mxGetPi(alm_arr);
+                    
+                    // Allocate buffers for single map processing (reused for each map)
+                    vector<double> map_single_buffer;
+                    try {
+                        map_single_buffer.resize(nmaps * npix, 0.0);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate map_single_buffer: size = %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing npix.",
+                            nmaps, npix, nmaps * npix);
+                    }
+                    
+                    vector<complex<double>> alm_single_buffer;
+                    try {
+                        alm_single_buffer.resize(ncomp * nalm_dim);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate alm_single_buffer: size = %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing lmax (currently %zu).",
+                            ncomp, nalm_dim, ncomp * nalm_dim, lmax);
+                    }
+                    
+                    // Get sparse array structure
                     mwIndex *ir = mxGetIr(map_arr);  // Row indices
                     mwIndex *jc = mxGetJc(map_arr);  // Column pointers
                     const double *pr = mxGetPr(map_arr);  // Non-zero values
-                    mwIndex nzmax = mxGetNzmax(map_arr);
-                    
-                    // Find which rows (maps) have non-zero elements
-                    vector<bool> row_has_data(N, false);
-                    vector<size_t> non_zero_row_indices;
-                    non_zero_row_indices.reserve(N);  // Reserve space, but likely much fewer
-                    
                     size_t npix_total = nmaps * npix;  // Total columns in sparse array
-                    for (mwIndex col = 0; col < npix_total; ++col) {
-                        mwIndex row_start = jc[col];
-                        mwIndex row_end = jc[col + 1];
-                        for (mwIndex i = row_start; i < row_end; ++i) {
-                            mwIndex row = ir[i];
-                            if (row < (mwIndex)N && !row_has_data[row]) {
-                                row_has_data[row] = true;
-                                non_zero_row_indices.push_back(row);
-                            }
-                        }
-                    }
                     
-                    // Sort row indices for efficient processing
-                    sort(non_zero_row_indices.begin(), non_zero_row_indices.end());
-                    size_t N_nonzero = non_zero_row_indices.size();
-                    
-                    if (N_nonzero == 0) {
-                        // All maps are zero - create zero output array
-                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
-                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
-                        if (alm_arr == nullptr) {
-                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                                "Failed to create output array: dimensions [%zu, %zu, %zu]. "
-                                "Not enough memory available. Consider reducing lmax or batch size.",
-                                N, ncomp, nalm_dim);
-                        }
-                        // Array is already initialized to zeros
-                    } else {
-                        // Extract only non-zero maps into batch buffer
-                        vector<double> map_batch_buffer;
-                        try {
-                            map_batch_buffer.resize(N_nonzero * nmaps * npix, 0.0);
-                        } catch (const std::bad_alloc &e) {
-                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                                "Failed to allocate map_batch_buffer: size = %zu * %zu * %zu = %zu elements. "
-                                "Not enough memory available. Consider processing fewer maps or reducing npix/lmax.",
-                                N_nonzero, nmaps, npix, N_nonzero * nmaps * npix);
-                        }
+                    // Process each map individually
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        // Clear buffer for this map
+                        fill(map_single_buffer.begin(), map_single_buffer.end(), 0.0);
                         
-                        // Extract sparse data for non-zero rows only
+                        // Extract sparse data for this map only
+                        // For sparse format [N, ncomp*npix], row ibatch contains map ibatch
                         for (mwIndex col = 0; col < npix_total; ++col) {
                             mwIndex row_start = jc[col];
                             mwIndex row_end = jc[col + 1];
                             for (mwIndex i = row_start; i < row_end; ++i) {
                                 mwIndex row = ir[i];
-                                double val = pr[i];
-                                
-                                // Find position in non-zero batch
-                                auto it = lower_bound(non_zero_row_indices.begin(), non_zero_row_indices.end(), row);
-                                if (it != non_zero_row_indices.end() && *it == row) {
-                                    size_t batch_idx = distance(non_zero_row_indices.begin(), it);
-                                    
+                                if (row == (mwIndex)ibatch) {
+                                    double val = pr[i];
                                     // Column j represents pixel in flattened format
                                     // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
                                     size_t imap = col / npix;
                                     size_t ipix = col % npix;
                                     if (imap < nmaps && ipix < npix) {
-                                        // Convert to batch buffer: [N_nonzero, nmaps, npix]
-                                        size_t idx_batch = batch_idx * nmaps * npix + imap * npix + ipix;
-                                        map_batch_buffer[idx_batch] = val;
+                                        size_t idx_ducc = imap * npix + ipix;
+                                        map_single_buffer[idx_ducc] = val;
                                     }
                                 }
                             }
                         }
                         
-                        // Process all non-zero maps together in batch
-                        array<size_t,3> map_batch_shape = {N_nonzero, nmaps, npix};
-                        cmav<double,3> map_batch_view(map_batch_buffer.data(), map_batch_shape);
+                        // Process this single map
+                        array<size_t,2> map_single_shape = {nmaps, npix};
+                        cmav<double,2> map_single_view(map_single_buffer.data(), map_single_shape);
                         
-                        vector<complex<double>> alm_batch_buffer;
-                        try {
-                            alm_batch_buffer.resize(N_nonzero * ncomp * nalm_dim);
-                        } catch (const std::bad_alloc &e) {
-                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                                "Failed to allocate alm_batch_buffer: size = %zu * %zu * %zu = %zu elements. "
-                                "Not enough memory available. Consider reducing lmax or processing fewer maps.",
-                                N_nonzero, ncomp, nalm_dim, N_nonzero * ncomp * nalm_dim);
-                        }
-                        array<size_t,3> alm_batch_shape = {N_nonzero, ncomp, nalm_dim};
-                        vmav<complex<double>,3> alm_batch_view(alm_batch_buffer.data(), alm_batch_shape);
+                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
+                        vmav<complex<double>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
                         
-                        // Call batch function for non-zero maps
-                        adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
-                                               theta_view, nphi_view, phi0_view, ringstart_view,
-                                               ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        // Perform adjoint synthesis for this map
+                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
+                                         theta_view, nphi_view, phi0_view, ringstart_view,
+                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                         
-                        // Now create output array AFTER processing (to avoid memory error if processing fails)
-                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
-                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
-                        if (alm_arr == nullptr) {
-                            mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                                "Failed to create output array: dimensions [%zu, %zu, %zu]. "
-                                "Not enough memory available. Consider reducing lmax or batch size.",
-                                N, ncomp, nalm_dim);
-                        }
-                        alm_real = mxGetPr(alm_arr);
-                        alm_imag = mxGetPi(alm_arr);
-                        
-                        // Copy results back to output, mapping non-zero batch indices to original row indices
-                        // Output is initialized to zeros, so zero rows stay zero
-                        for (size_t i = 0; i < N_nonzero; ++i) {
-                            size_t orig_row = non_zero_row_indices[i];
-                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                    size_t idx_batch = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                    size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                    alm_real[idx_matlab] = alm_batch_buffer[idx_batch].real();
-                                    alm_imag[idx_matlab] = alm_batch_buffer[idx_batch].imag();
-                                }
+                        // Copy result to output array (column-major MATLAB format)
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp; // Column-major
+                                alm_real[idx_matlab] = alm_single_buffer[idx_ducc].real();
+                                alm_imag[idx_matlab] = alm_single_buffer[idx_ducc].imag();
                             }
                         }
                     }
@@ -775,101 +738,92 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process only non-zero maps together
+                // For sparse arrays in batch mode, process one map at a time to respect sparsity
                 if (is_sparse) {
-                    // Extract sparse data and identify non-zero rows (maps)
+                    // Create output array first
+                    mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                    alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                    if (alm_arr == nullptr) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to create output array: dimensions [%zu, %zu, %zu]. "
+                            "Not enough memory available. Consider reducing lmax or batch size.",
+                            N, ncomp, nalm_dim);
+                    }
+                    alm_real = (float *)mxGetData(alm_arr);
+                    alm_imag = (float *)mxGetImagData(alm_arr);
+                    
+                    // Allocate buffers for single map processing (reused for each map)
+                    vector<float> map_single_buffer;
+                    try {
+                        map_single_buffer.resize(nmaps * npix, 0.0f);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate map_single_buffer: size = %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing npix.",
+                            nmaps, npix, nmaps * npix);
+                    }
+                    
+                    vector<complex<float>> alm_single_buffer;
+                    try {
+                        alm_single_buffer.resize(ncomp * nalm_dim);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate alm_single_buffer: size = %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing lmax (currently %zu).",
+                            ncomp, nalm_dim, ncomp * nalm_dim, lmax);
+                    }
+                    
+                    // Get sparse array structure
                     mwIndex *ir = mxGetIr(map_arr);  // Row indices
                     mwIndex *jc = mxGetJc(map_arr);  // Column pointers
                     const float *pr = (const float *)mxGetData(map_arr);  // Non-zero values
-                    mwIndex nzmax = mxGetNzmax(map_arr);
-                    
-                    // Find which rows (maps) have non-zero elements
-                    vector<bool> row_has_data(N, false);
-                    vector<size_t> non_zero_row_indices;
-                    non_zero_row_indices.reserve(N);  // Reserve space, but likely much fewer
-                    
                     size_t npix_total = nmaps * npix;  // Total columns in sparse array
-                    for (mwIndex col = 0; col < npix_total; ++col) {
-                        mwIndex row_start = jc[col];
-                        mwIndex row_end = jc[col + 1];
-                        for (mwIndex i = row_start; i < row_end; ++i) {
-                            mwIndex row = ir[i];
-                            if (row < (mwIndex)N && !row_has_data[row]) {
-                                row_has_data[row] = true;
-                                non_zero_row_indices.push_back(row);
-                            }
-                        }
-                    }
                     
-                    // Sort row indices for efficient processing
-                    sort(non_zero_row_indices.begin(), non_zero_row_indices.end());
-                    size_t N_nonzero = non_zero_row_indices.size();
-                    
-                    if (N_nonzero == 0) {
-                        // All maps are zero - create zero output array
-                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
-                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
-                        // Array is already initialized to zeros
-                    } else {
-                        // Extract only non-zero maps into batch buffer
-                        vector<float> map_batch_buffer(N_nonzero * nmaps * npix, 0.0f);
+                    // Process each map individually
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
+                        // Clear buffer for this map
+                        fill(map_single_buffer.begin(), map_single_buffer.end(), 0.0f);
                         
-                        // Extract sparse data for non-zero rows only
+                        // Extract sparse data for this map only
+                        // For sparse format [N, ncomp*npix], row ibatch contains map ibatch
                         for (mwIndex col = 0; col < npix_total; ++col) {
                             mwIndex row_start = jc[col];
                             mwIndex row_end = jc[col + 1];
                             for (mwIndex i = row_start; i < row_end; ++i) {
                                 mwIndex row = ir[i];
-                                float val = pr[i];
-                                
-                                // Find position in non-zero batch
-                                auto it = lower_bound(non_zero_row_indices.begin(), non_zero_row_indices.end(), row);
-                                if (it != non_zero_row_indices.end() && *it == row) {
-                                    size_t batch_idx = distance(non_zero_row_indices.begin(), it);
-                                    
+                                if (row == (mwIndex)ibatch) {
+                                    float val = pr[i];
                                     // Column j represents pixel in flattened format
                                     // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
                                     size_t imap = col / npix;
                                     size_t ipix = col % npix;
                                     if (imap < nmaps && ipix < npix) {
-                                        // Convert to batch buffer: [N_nonzero, nmaps, npix]
-                                        size_t idx_batch = batch_idx * nmaps * npix + imap * npix + ipix;
-                                        map_batch_buffer[idx_batch] = val;
+                                        size_t idx_ducc = imap * npix + ipix;
+                                        map_single_buffer[idx_ducc] = val;
                                     }
                                 }
                             }
                         }
                         
-                        // Process all non-zero maps together in batch
-                        array<size_t,3> map_batch_shape = {N_nonzero, nmaps, npix};
-                        cmav<float,3> map_batch_view(map_batch_buffer.data(), map_batch_shape);
+                        // Process this single map
+                        array<size_t,2> map_single_shape = {nmaps, npix};
+                        cmav<float,2> map_single_view(map_single_buffer.data(), map_single_shape);
                         
-                        vector<complex<float>> alm_batch_buffer(N_nonzero * ncomp * nalm_dim);
-                        array<size_t,3> alm_batch_shape = {N_nonzero, ncomp, nalm_dim};
-                        vmav<complex<float>,3> alm_batch_view(alm_batch_buffer.data(), alm_batch_shape);
+                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
+                        vmav<complex<float>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
                         
-                        // Call batch function for non-zero maps
-                        adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
-                                               theta_view, nphi_view, phi0_view, ringstart_view,
-                                               ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        // Perform adjoint synthesis for this map
+                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
+                                         theta_view, nphi_view, phi0_view, ringstart_view,
+                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                         
-                        // Now create output array AFTER processing (to avoid memory error if processing fails)
-                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
-                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
-                        alm_real = (float *)mxGetData(alm_arr);
-                        alm_imag = (float *)mxGetImagData(alm_arr);
-                        
-                        // Copy results back to output, mapping non-zero batch indices to original row indices
-                        // Output is initialized to zeros, so zero rows stay zero
-                        for (size_t i = 0; i < N_nonzero; ++i) {
-                            size_t orig_row = non_zero_row_indices[i];
-                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                    size_t idx_batch = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                    size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                    alm_real[idx_matlab] = alm_batch_buffer[idx_batch].real();
-                                    alm_imag[idx_matlab] = alm_batch_buffer[idx_batch].imag();
-                                }
+                        // Copy result to output array (column-major MATLAB format)
+                        for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                            for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
+                                size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp; // Column-major
+                                alm_real[idx_matlab] = alm_single_buffer[idx_ducc].real();
+                                alm_imag[idx_matlab] = alm_single_buffer[idx_ducc].imag();
                             }
                         }
                     }
