@@ -468,7 +468,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process one map at a time to respect sparsity
+                // For sparse arrays in batch mode, process all maps together to reuse computation
+                // (FFTs, basis functions computed once, reused for all maps)
                 if (is_sparse) {
                     // Create output array first
                     mwSize alm_dims[3] = {N, ncomp, nalm_dim};
@@ -482,25 +483,16 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     alm_real = mxGetPr(alm_arr);
                     alm_imag = mxGetPi(alm_arr);
                     
-                    // Allocate buffers for single map processing (reused for each map)
-                    vector<double> map_single_buffer;
+                    // Allocate buffer for all maps (will be mostly zeros for sparse data)
+                    // This allows batch processing which reuses expensive computations
+                    vector<double> map_buffer;
                     try {
-                        map_single_buffer.resize(nmaps * npix, 0.0);
+                        map_buffer.resize(N * nmaps * npix, 0.0);  // Initialize to zeros
                     } catch (const std::bad_alloc &e) {
                         mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                            "Failed to allocate map_single_buffer: size = %zu * %zu = %zu elements. "
-                            "Not enough memory available. Consider reducing npix.",
-                            nmaps, npix, nmaps * npix);
-                    }
-                    
-                    vector<complex<double>> alm_single_buffer;
-                    try {
-                        alm_single_buffer.resize(ncomp * nalm_dim);
-                    } catch (const std::bad_alloc &e) {
-                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                            "Failed to allocate alm_single_buffer: size = %zu * %zu = %zu elements. "
-                            "Not enough memory available. Consider reducing lmax (currently %zu).",
-                            ncomp, nalm_dim, ncomp * nalm_dim, lmax);
+                            "Failed to allocate map_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider processing fewer maps or reducing npix.",
+                            N, nmaps, npix, N * nmaps * npix);
                     }
                     
                     // Get sparse array structure
@@ -509,51 +501,59 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     const double *pr = mxGetPr(map_arr);  // Non-zero values
                     size_t npix_total = nmaps * npix;  // Total columns in sparse array
                     
-                    // Process each map individually
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        // Clear buffer for this map
-                        fill(map_single_buffer.begin(), map_single_buffer.end(), 0.0);
-                        
-                        // Extract sparse data for this map only
-                        // For sparse format [N, ncomp*npix], row ibatch contains map ibatch
-                        for (mwIndex col = 0; col < npix_total; ++col) {
-                            mwIndex row_start = jc[col];
-                            mwIndex row_end = jc[col + 1];
-                            for (mwIndex i = row_start; i < row_end; ++i) {
-                                mwIndex row = ir[i];
-                                if (row == (mwIndex)ibatch) {
-                                    double val = pr[i];
-                                    // Column j represents pixel in flattened format
-                                    // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
-                                    size_t imap = col / npix;
-                                    size_t ipix = col % npix;
-                                    if (imap < nmaps && ipix < npix) {
-                                        size_t idx_ducc = imap * npix + ipix;
-                                        map_single_buffer[idx_ducc] = val;
-                                    }
+                    // Extract only non-zero values from sparse matrix into dense buffer
+                    // This is efficient: we only iterate over non-zero entries
+                    for (mwIndex col = 0; col < npix_total; ++col) {
+                        mwIndex row_start = jc[col];
+                        mwIndex row_end = jc[col + 1];
+                        for (mwIndex i = row_start; i < row_end; ++i) {
+                            mwIndex row = ir[i];
+                            if (row < (mwIndex)N) {
+                                double val = pr[i];
+                                
+                                // Column j represents pixel in flattened format
+                                // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
+                                size_t imap = col / npix;
+                                size_t ipix = col % npix;
+                                if (imap < nmaps && ipix < npix) {
+                                    // Convert to batch buffer: [N, nmaps, npix] (row-major)
+                                    size_t idx_buffer = row * nmaps * npix + imap * npix + ipix;
+                                    map_buffer[idx_buffer] = val;
                                 }
                             }
                         }
-                        
-                        // Process this single map
-                        array<size_t,2> map_single_shape = {nmaps, npix};
-                        cmav<double,2> map_single_view(map_single_buffer.data(), map_single_shape);
-                        
-                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
-                        vmav<complex<double>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
-                        
-                        // Perform adjoint synthesis for this map
-                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
-                                         theta_view, nphi_view, phi0_view, ringstart_view,
-                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-                        
-                        // Copy result to output array (column-major MATLAB format)
+                    }
+                    
+                    // Process all maps together using batch function
+                    // This reuses expensive computations (FFTs, basis functions) across all maps
+                    array<size_t,3> map_shape = {N, nmaps, npix};
+                    cmav<double,3> map_view(map_buffer.data(), map_shape);
+                    
+                    vector<complex<double>> alm_buffer;
+                    try {
+                        alm_buffer.resize(N * ncomp * nalm_dim);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate alm_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing lmax or batch size.",
+                            N, ncomp, nalm_dim, N * ncomp * nalm_dim);
+                    }
+                    array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                    vmav<complex<double>,3> alm_view(alm_buffer.data(), alm_shape);
+                    
+                    // Call batch function for all maps (reuses computation, enables multithreading)
+                    adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                           theta_view, nphi_view, phi0_view, ringstart_view,
+                                           ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                    
+                    // Copy results to output array (column-major MATLAB format)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
                         for (size_t icomp = 0; icomp < ncomp; ++icomp) {
                             for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
-                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp; // Column-major
-                                alm_real[idx_matlab] = alm_single_buffer[idx_ducc].real();
-                                alm_imag[idx_matlab] = alm_single_buffer[idx_ducc].imag();
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
                             }
                         }
                     }
@@ -738,7 +738,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             };
             
             if (is_batch_mode) {
-                // For sparse arrays in batch mode, process one map at a time to respect sparsity
+                // For sparse arrays in batch mode, process all maps together to reuse computation
+                // (FFTs, basis functions computed once, reused for all maps)
                 if (is_sparse) {
                     // Create output array first
                     mwSize alm_dims[3] = {N, ncomp, nalm_dim};
@@ -752,25 +753,16 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     alm_real = (float *)mxGetData(alm_arr);
                     alm_imag = (float *)mxGetImagData(alm_arr);
                     
-                    // Allocate buffers for single map processing (reused for each map)
-                    vector<float> map_single_buffer;
+                    // Allocate buffer for all maps (will be mostly zeros for sparse data)
+                    // This allows batch processing which reuses expensive computations
+                    vector<float> map_buffer;
                     try {
-                        map_single_buffer.resize(nmaps * npix, 0.0f);
+                        map_buffer.resize(N * nmaps * npix, 0.0f);  // Initialize to zeros
                     } catch (const std::bad_alloc &e) {
                         mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                            "Failed to allocate map_single_buffer: size = %zu * %zu = %zu elements. "
-                            "Not enough memory available. Consider reducing npix.",
-                            nmaps, npix, nmaps * npix);
-                    }
-                    
-                    vector<complex<float>> alm_single_buffer;
-                    try {
-                        alm_single_buffer.resize(ncomp * nalm_dim);
-                    } catch (const std::bad_alloc &e) {
-                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
-                            "Failed to allocate alm_single_buffer: size = %zu * %zu = %zu elements. "
-                            "Not enough memory available. Consider reducing lmax (currently %zu).",
-                            ncomp, nalm_dim, ncomp * nalm_dim, lmax);
+                            "Failed to allocate map_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider processing fewer maps or reducing npix.",
+                            N, nmaps, npix, N * nmaps * npix);
                     }
                     
                     // Get sparse array structure
@@ -779,58 +771,66 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     const float *pr = (const float *)mxGetData(map_arr);  // Non-zero values
                     size_t npix_total = nmaps * npix;  // Total columns in sparse array
                     
-                    // Process each map individually
-                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                        // Clear buffer for this map
-                        fill(map_single_buffer.begin(), map_single_buffer.end(), 0.0f);
-                        
-                        // Extract sparse data for this map only
-                        // For sparse format [N, ncomp*npix], row ibatch contains map ibatch
-                        for (mwIndex col = 0; col < npix_total; ++col) {
-                            mwIndex row_start = jc[col];
-                            mwIndex row_end = jc[col + 1];
-                            for (mwIndex i = row_start; i < row_end; ++i) {
-                                mwIndex row = ir[i];
-                                if (row == (mwIndex)ibatch) {
-                                    float val = pr[i];
-                                    // Column j represents pixel in flattened format
-                                    // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
-                                    size_t imap = col / npix;
-                                    size_t ipix = col % npix;
-                                    if (imap < nmaps && ipix < npix) {
-                                        size_t idx_ducc = imap * npix + ipix;
-                                        map_single_buffer[idx_ducc] = val;
-                                    }
+                    // Extract only non-zero values from sparse matrix into dense buffer
+                    // This is efficient: we only iterate over non-zero entries
+                    for (mwIndex col = 0; col < npix_total; ++col) {
+                        mwIndex row_start = jc[col];
+                        mwIndex row_end = jc[col + 1];
+                        for (mwIndex i = row_start; i < row_end; ++i) {
+                            mwIndex row = ir[i];
+                            if (row < (mwIndex)N) {
+                                float val = pr[i];
+                                
+                                // Column j represents pixel in flattened format
+                                // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
+                                size_t imap = col / npix;
+                                size_t ipix = col % npix;
+                                if (imap < nmaps && ipix < npix) {
+                                    // Convert to batch buffer: [N, nmaps, npix] (row-major)
+                                    size_t idx_buffer = row * nmaps * npix + imap * npix + ipix;
+                                    map_buffer[idx_buffer] = val;
                                 }
                             }
                         }
-                        
-                        // Process this single map
-                        array<size_t,2> map_single_shape = {nmaps, npix};
-                        cmav<float,2> map_single_view(map_single_buffer.data(), map_single_shape);
-                        
-                        array<size_t,2> alm_single_shape = {ncomp, nalm_dim};
-                        vmav<complex<float>,2> alm_single_view(alm_single_buffer.data(), alm_single_shape);
-                        
-                        // Perform adjoint synthesis for this map
-                        adjoint_synthesis(alm_single_view, map_single_view, spin, lmax, mstart_view, lstride,
-                                         theta_view, nphi_view, phi0_view, ringstart_view,
-                                         ringfactor_view, pixstride, nthreads, mode, theta_interpol);
-                        
-                        // Copy result to output array (column-major MATLAB format)
+                    }
+                    
+                    // Process all maps together using batch function
+                    // This reuses expensive computations (FFTs, basis functions) across all maps
+                    array<size_t,3> map_shape = {N, nmaps, npix};
+                    cmav<float,3> map_view(map_buffer.data(), map_shape);
+                    
+                    vector<complex<float>> alm_buffer;
+                    try {
+                        alm_buffer.resize(N * ncomp * nalm_dim);
+                    } catch (const std::bad_alloc &e) {
+                        mexErrMsgIdAndTxt("DUCC0:SHT:AdjointSynthesis:MemoryError", 
+                            "Failed to allocate alm_buffer: size = %zu * %zu * %zu = %zu elements. "
+                            "Not enough memory available. Consider reducing lmax or batch size.",
+                            N, ncomp, nalm_dim, N * ncomp * nalm_dim);
+                    }
+                    array<size_t,3> alm_shape = {N, ncomp, nalm_dim};
+                    vmav<complex<float>,3> alm_view(alm_buffer.data(), alm_shape);
+                    
+                    // Call batch function for all maps (reuses computation, enables multithreading)
+                    adjoint_synthesis_batch(alm_view, map_view, spin, lmax, mstart_view, lstride,
+                                           theta_view, nphi_view, phi0_view, ringstart_view,
+                                           ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                    
+                    // Copy results to output array (column-major MATLAB format)
+                    for (size_t ibatch = 0; ibatch < N; ++ibatch) {
                         for (size_t icomp = 0; icomp < ncomp; ++icomp) {
                             for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                size_t idx_ducc = icomp * nalm_dim + ialm; // Row-major
-                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp; // Column-major
-                                alm_real[idx_matlab] = alm_single_buffer[idx_ducc].real();
-                                alm_imag[idx_matlab] = alm_single_buffer[idx_ducc].imag();
+                                size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
+                                size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
+                                alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
+                                alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
                             }
                         }
                     }
                 } else {
                     // Dense batch mode: use batch C++ function
                     // Convert from MATLAB column-major to DUCC row-major for all maps
-                    vector<float> map_buffer(N * nmaps * npix);
+                    vector<float> map_buffer;
                     extract_map_data_float(map_buffer);
                     
                     // Create 3D views for batch processing (row-major)
