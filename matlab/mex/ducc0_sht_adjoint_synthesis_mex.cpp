@@ -299,15 +299,24 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         // Determine data type
         mxClassID class_id = mxGetClassID(map_arr);
         
-        // Create output array (complex, shape [N, ncomp, nalm_dim] for batch, [ncomp, nalm_dim] for single)
-        // Output is always dense
-        mxArray *alm_arr;
-        if (is_batch_mode) {
-            mwSize alm_dims[3] = {N, ncomp, nalm_dim};
-            alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+        // For sparse arrays, we'll identify non-zero maps first and create output later
+        // For dense arrays, create output array now
+        mxArray *alm_arr = nullptr;
+        vector<size_t> non_zero_row_indices;  // For sparse batch mode
+        size_t N_nonzero = 0;  // For sparse batch mode
+        
+        if (is_batch_mode && is_sparse) {
+            // Defer output array creation until we know how many non-zero maps there are
+            // We'll identify non-zero rows first
         } else {
-            mwSize alm_dims[2] = {ncomp, nalm_dim};
-            alm_arr = mxCreateNumericArray(2, alm_dims, class_id, mxCOMPLEX);
+            // Create output array now for dense arrays or single map mode
+            if (is_batch_mode) {
+                mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+            } else {
+                mwSize alm_dims[2] = {ncomp, nalm_dim};
+                alm_arr = mxCreateNumericArray(2, alm_dims, class_id, mxCOMPLEX);
+            }
         }
         
         // Create mstart view (reused for all maps)
@@ -328,8 +337,14 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         
         // Process based on data type
         if (class_id == mxDOUBLE_CLASS) {
-            double *alm_real = mxGetPr(alm_arr);
-            double *alm_imag = mxGetPi(alm_arr);
+            // For sparse batch mode, we'll create alm_arr after identifying non-zero maps
+            // For other cases, alm_arr is already created above
+            double *alm_real = nullptr;
+            double *alm_imag = nullptr;
+            if (alm_arr != nullptr) {
+                alm_real = mxGetPr(alm_arr);
+                alm_imag = mxGetPi(alm_arr);
+            }
             
             // Helper function to extract sparse or dense data into dense buffer
             auto extract_map_data = [&](vector<double> &map_buffer) {
@@ -442,8 +457,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     size_t N_nonzero = non_zero_row_indices.size();
                     
                     if (N_nonzero == 0) {
-                        // All maps are zero - output zeros
-                        // Output is already initialized to zeros, so just return
+                        // All maps are zero - create zero output array
+                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        // Array is already initialized to zeros
                     } else {
                         // Extract only non-zero maps into batch buffer
                         vector<double> map_batch_buffer(N_nonzero * nmaps * npix, 0.0);
@@ -486,6 +503,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
                                                theta_view, nphi_view, phi0_view, ringstart_view,
                                                ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        
+                        // Now create output array AFTER processing (to avoid memory error if processing fails)
+                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        alm_real = mxGetPr(alm_arr);
+                        alm_imag = mxGetPi(alm_arr);
                         
                         // Copy results back to output, mapping non-zero batch indices to original row indices
                         // Output is initialized to zeros, so zero rows stay zero
@@ -563,8 +586,14 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             }
             
         } else if (class_id == mxSINGLE_CLASS) {
-            float *alm_real = (float *)mxGetData(alm_arr);
-            float *alm_imag = (float *)mxGetImagData(alm_arr);
+            // For sparse batch mode, we'll create alm_arr after identifying non-zero maps
+            // For other cases, alm_arr is already created above
+            float *alm_real = nullptr;
+            float *alm_imag = nullptr;
+            if (alm_arr != nullptr) {
+                alm_real = (float *)mxGetData(alm_arr);
+                alm_imag = (float *)mxGetImagData(alm_arr);
+            }
             
             // Helper function to extract sparse or dense data into dense buffer (float version)
             auto extract_map_data_float = [&](vector<float> &map_buffer) {
@@ -675,8 +704,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                     size_t N_nonzero = non_zero_row_indices.size();
                     
                     if (N_nonzero == 0) {
-                        // All maps are zero - output zeros
-                        // Output is already initialized to zeros, so just return
+                        // All maps are zero - create zero output array
+                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        // Array is already initialized to zeros
                     } else {
                         // Extract only non-zero maps into batch buffer
                         vector<float> map_batch_buffer(N_nonzero * nmaps * npix, 0.0f);
@@ -719,6 +750,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         adjoint_synthesis_batch(alm_batch_view, map_batch_view, spin, lmax, mstart_view, lstride,
                                                theta_view, nphi_view, phi0_view, ringstart_view,
                                                ringfactor_view, pixstride, nthreads, mode, theta_interpol);
+                        
+                        // Now create output array AFTER processing (to avoid memory error if processing fails)
+                        mwSize alm_dims[3] = {N, ncomp, nalm_dim};
+                        alm_arr = mxCreateNumericArray(3, alm_dims, class_id, mxCOMPLEX);
+                        alm_real = (float *)mxGetData(alm_arr);
+                        alm_imag = (float *)mxGetImagData(alm_arr);
                         
                         // Copy results back to output, mapping non-zero batch indices to original row indices
                         // Output is initialized to zeros, so zero rows stay zero
