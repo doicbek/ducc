@@ -678,6 +678,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
+                            
+                            // Move to next chunk
+                            chunk_start = chunk_end;
+                        }
                         }
                     }
                 } else {
@@ -1074,6 +1078,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             
                             // Move to next chunk
                             chunk_start = chunk_end;
+                        }
                         }
                     }
                 } else {
