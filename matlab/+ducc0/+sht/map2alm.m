@@ -131,16 +131,40 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
             if npix_padded ~= npix_expected
                 % Need padding - rebuild sparse array with padding
                 map_padded = sparse(N, ncomp * npix_padded);
-                for i = 1:N
-                    % Extract map i and reshape to [ncomp, npix]
-                    map_row = map(i, :);
-                    % For sparse arrays, need to extract as full for reshaping
-                    % (unavoidable when padding is needed)
-                    map_2d = reshape(full(map_row), [ncomp, npix_expected]);
-                    % Pad (preserves structure, may return sparse if input was sparse)
-                    map_2d_padded = ducc0.sht.pad_map(map_2d, map_info.si);
-                    % Reshape back to row and store as sparse
-                    map_padded(i, :) = sparse(reshape(map_2d_padded, [1, ncomp * npix_padded]));
+                % Use parfor for parallelization when N is large enough
+                % Threshold chosen to balance overhead vs. benefit
+                use_parfor = (N > 100) && (exist('parfor', 'builtin') == 5);
+                if use_parfor
+                    % Pre-allocate temporary storage for parallel loop
+                    map_rows_cell = cell(N, 1);
+                    parfor i = 1:N
+                        % Extract map i and reshape to [ncomp, npix]
+                        map_row = map(i, :);
+                        % For sparse arrays, need to extract as full for reshaping
+                        % (unavoidable when padding is needed)
+                        map_2d = reshape(full(map_row), [ncomp, npix_expected]);
+                        % Pad (preserves structure, may return sparse if input was sparse)
+                        map_2d_padded = ducc0.sht.pad_map(map_2d, map_info.si);
+                        % Reshape back to row and store in cell array
+                        map_rows_cell{i} = sparse(reshape(map_2d_padded, [1, ncomp * npix_padded]));
+                    end
+                    % Copy results back to sparse array
+                    for i = 1:N
+                        map_padded(i, :) = map_rows_cell{i};
+                    end
+                else
+                    % Sequential processing for small N or when parfor unavailable
+                    for i = 1:N
+                        % Extract map i and reshape to [ncomp, npix]
+                        map_row = map(i, :);
+                        % For sparse arrays, need to extract as full for reshaping
+                        % (unavoidable when padding is needed)
+                        map_2d = reshape(full(map_row), [ncomp, npix_expected]);
+                        % Pad (preserves structure, may return sparse if input was sparse)
+                        map_2d_padded = ducc0.sht.pad_map(map_2d, map_info.si);
+                        % Reshape back to row and store as sparse
+                        map_padded(i, :) = sparse(reshape(map_2d_padded, [1, ncomp * npix_padded]));
+                    end
                 end
                 map = map_padded;
                 npix = npix_padded;
@@ -165,17 +189,29 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         end
         
         % Pad map if CAR pixelization
-        map_padded = [];
-        for i = 1:N
-            % Extract single map [ncomp, npix] without removing dimensions
-            map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
-            map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
-            if i == 1
-                % Initialize with correct size after padding
-                npix_padded = size(map_single_padded, 2);
-                map_padded = zeros(N, ncomp, npix_padded);
+        % First determine padded size by checking first map
+        map_first = reshape(map(1, :, :), [ncomp, npix_expected]);
+        map_first_padded = ducc0.sht.pad_map(map_first, map_info.si);
+        npix_padded = size(map_first_padded, 2);
+        map_padded = zeros(N, ncomp, npix_padded);
+        
+        % Use parfor for parallelization when N is large enough
+        use_parfor = (N > 100) && (exist('parfor', 'builtin') == 5);
+        if use_parfor
+            parfor i = 1:N
+                % Extract single map [ncomp, npix] without removing dimensions
+                map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
+                map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
+                map_padded(i, :, :) = map_single_padded;
             end
-            map_padded(i, :, :) = map_single_padded;
+        else
+            % Sequential processing for small N or when parfor unavailable
+            for i = 1:N
+                % Extract single map [ncomp, npix] without removing dimensions
+                map_single = reshape(map(i, :, :), [ncomp, npix_expected]);
+                map_single_padded = ducc0.sht.pad_map(map_single, map_info.si);
+                map_padded(i, :, :) = map_single_padded;
+            end
         end
         map = map_padded;
         npix = size(map, 3);
@@ -200,13 +236,13 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         % map is 2D: [N, ncomp*npix] or [ncomp, npix]
         map_weighted = ducc0.sht.times_weight(map, sht_info);
     else
-        % For dense arrays, process in 3D format
-        map_weighted = zeros(size(map));
-        for i = 1:N
-            % Extract single map [ncomp, npix] without removing dimensions
-            map_single = reshape(map(i, :, :), [ncomp, size(map, 3)]);
-            map_weighted(i, :, :) = ducc0.sht.times_weight(map_single, sht_info);
-        end
+        % For dense arrays, use vectorized operation
+        % times_weight multiplies by a scalar weight, which works element-wise on 3D arrays
+        % Reshape to 2D, multiply, then reshape back
+        [N_dim, ncomp_dim, npix_dim] = size(map);
+        map_2d = reshape(map, [N_dim * ncomp_dim, npix_dim]);
+        map_weighted_2d = ducc0.sht.times_weight(map_2d, sht_info);
+        map_weighted = reshape(map_weighted_2d, [N_dim, ncomp_dim, npix_dim]);
     end
     
     % First iteration: adjoint synthesis (batch mode)
