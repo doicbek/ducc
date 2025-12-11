@@ -41,9 +41,6 @@
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 using namespace ducc0;
 using namespace ducc0_mex;
@@ -543,39 +540,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             }
                             
                             // Extract sparse data for all non-zero maps
-                            // Parallelize column iteration for better performance
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (npix_total > 1000 && nthreads > 1)
-                            {
-                                // Each thread processes a subset of columns
-                                #pragma omp for schedule(static)
-                                for (mwIndex col = 0; col < npix_total; ++col) {
-                                    mwIndex row_start = jc[col];
-                                    mwIndex row_end = jc[col + 1];
-                                    for (mwIndex i = row_start; i < row_end; ++i) {
-                                        mwIndex row = ir[i];
-                                        double val = pr[i];
-                                        
-                                        // Use O(1) lookup instead of binary search
-                                        auto it = row_to_batch_idx.find(row);
-                                        if (it != row_to_batch_idx.end()) {
-                                            size_t batch_idx = it->second;
-                                            
-                                            // Column j represents pixel in flattened format
-                                            // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
-                                            size_t imap = col / npix;
-                                            size_t ipix = col % npix;
-                                            if (imap < nmaps && ipix < npix) {
-                                                // Convert to batch buffer: [N_nonzero, nmaps, npix]
-                                                size_t idx_buffer = batch_idx * nmaps * npix + imap * npix + ipix;
-                                                map_buffer[idx_buffer] = val;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Use O(1) lookup map instead of binary search for better performance
                             for (mwIndex col = 0; col < npix_total; ++col) {
                                 mwIndex row_start = jc[col];
                                 mwIndex row_end = jc[col + 1];
@@ -600,7 +565,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                             
                             // Process all non-zero maps together using batch function
                             // This maximizes computation reuse and multithreading
@@ -624,25 +588,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                                    theta_view, nphi_view, phi0_view, ringstart_view,
                                                    ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                             
-                            // Copy results to output array (parallelize outer loop)
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (N_nonzero > 100 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (size_t i = 0; i < N_nonzero; ++i) {
-                                    size_t orig_row = non_zero_row_indices[i];
-                                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                            size_t idx_buffer = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                            size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Copy results to output array
+                            // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                             for (size_t i = 0; i < N_nonzero; ++i) {
                                 size_t orig_row = non_zero_row_indices[i];
                                 for (size_t icomp = 0; icomp < ncomp; ++icomp) {
@@ -654,7 +601,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                         } else {
                             // Fall back to chunking if memory is limited
                             // Process non-zero maps in chunks
@@ -686,38 +632,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             }
                             
                             // Extract sparse data only for this chunk of non-zero maps
-                            // Parallelize column iteration
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (npix_total > 1000 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (mwIndex col = 0; col < npix_total; ++col) {
-                                    mwIndex row_start = jc[col];
-                                    mwIndex row_end = jc[col + 1];
-                                    for (mwIndex i = row_start; i < row_end; ++i) {
-                                        mwIndex row = ir[i];
-                                        double val = pr[i];
-                                        
-                                        // Use O(1) lookup instead of binary search
-                                        auto it = row_to_chunk_idx.find(row);
-                                        if (it != row_to_chunk_idx.end()) {
-                                            size_t chunk_idx = it->second;
-                                            
-                                            // Column j represents pixel in flattened format
-                                            // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
-                                            size_t imap = col / npix;
-                                            size_t ipix = col % npix;
-                                            if (imap < nmaps && ipix < npix) {
-                                                // Convert to chunk buffer: [chunk_N, nmaps, npix]
-                                                size_t idx_buffer = chunk_idx * nmaps * npix + imap * npix + ipix;
-                                                map_buffer[idx_buffer] = val;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Use O(1) lookup map instead of binary search for better performance
                             for (mwIndex col = 0; col < npix_total; ++col) {
                                 mwIndex row_start = jc[col];
                                 mwIndex row_end = jc[col + 1];
@@ -742,7 +657,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                             
                             // Process this chunk using batch function (reuses computation within chunk)
                             array<size_t,3> map_shape = {chunk_N, nmaps, npix};
@@ -766,25 +680,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                                    ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                             
                             // Copy results to output array, mapping chunk indices to original row indices
-                            // Parallelize outer loop
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (chunk_N > 100 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (size_t i = 0; i < chunk_N; ++i) {
-                                    size_t orig_row = non_zero_row_indices[chunk_start + i];
-                                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                            size_t idx_buffer = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                            size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                             for (size_t i = 0; i < chunk_N; ++i) {
                                 size_t orig_row = non_zero_row_indices[chunk_start + i];
                                 for (size_t icomp = 0; icomp < ncomp; ++icomp) {
@@ -796,7 +692,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                             
                             // Move to next chunk
                             chunk_start = chunk_end;
@@ -838,24 +733,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                            theta_view, nphi_view, phi0_view, ringstart_view,
                                            ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                     
-                    // Copy from buffer to MATLAB (column-major) - parallelize outer loop
-                    #ifdef _OPENMP
-                    #pragma omp parallel if (N > 100 && nthreads > 1)
-                    {
-                        #pragma omp for schedule(static)
-                        for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                    size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                    size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                                    alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                    alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                }
-                            }
-                        }
-                    }
-                    #else
-                    // Sequential version when OpenMP not available
+                    // Copy from buffer to MATLAB (column-major)
+                    // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                     for (size_t ibatch = 0; ibatch < N; ++ibatch) {
                         for (size_t icomp = 0; icomp < ncomp; ++icomp) {
                             for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
@@ -866,7 +745,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             }
                         }
                     }
-                    #endif
                 }
             } else {
                 // Single mode: use regular function
@@ -1154,25 +1032,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                                    theta_view, nphi_view, phi0_view, ringstart_view,
                                                    ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                             
-                            // Copy results to output array (parallelize outer loop)
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (N_nonzero > 100 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (size_t i = 0; i < N_nonzero; ++i) {
-                                    size_t orig_row = non_zero_row_indices[i];
-                                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                            size_t idx_buffer = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                            size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Copy results to output array
+                            // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                             for (size_t i = 0; i < N_nonzero; ++i) {
                                 size_t orig_row = non_zero_row_indices[i];
                                 for (size_t icomp = 0; icomp < ncomp; ++icomp) {
@@ -1184,7 +1045,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                         } else {
                             // Fall back to chunking if memory is limited
                             // Process non-zero maps in chunks
@@ -1216,38 +1076,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             }
                             
                             // Extract sparse data only for this chunk of non-zero maps
-                            // Parallelize column iteration
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (npix_total > 1000 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (mwIndex col = 0; col < npix_total; ++col) {
-                                    mwIndex row_start = jc[col];
-                                    mwIndex row_end = jc[col + 1];
-                                    for (mwIndex i = row_start; i < row_end; ++i) {
-                                        mwIndex row = ir[i];
-                                        float val = pr[i];
-                                        
-                                        // Use O(1) lookup instead of binary search
-                                        auto it = row_to_chunk_idx.find(row);
-                                        if (it != row_to_chunk_idx.end()) {
-                                            size_t chunk_idx = it->second;
-                                            
-                                            // Column j represents pixel in flattened format
-                                            // Map to [nmaps, npix]: component = j/npix, pixel = j%npix
-                                            size_t imap = col / npix;
-                                            size_t ipix = col % npix;
-                                            if (imap < nmaps && ipix < npix) {
-                                                // Convert to chunk buffer: [chunk_N, nmaps, npix]
-                                                size_t idx_buffer = chunk_idx * nmaps * npix + imap * npix + ipix;
-                                                map_buffer[idx_buffer] = val;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Use O(1) lookup map instead of binary search for better performance
                             for (mwIndex col = 0; col < npix_total; ++col) {
                                 mwIndex row_start = jc[col];
                                 mwIndex row_end = jc[col + 1];
@@ -1272,7 +1101,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                             
                             // Process this chunk using batch function (reuses computation within chunk)
                             array<size_t,3> map_shape = {chunk_N, nmaps, npix};
@@ -1296,25 +1124,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                                    ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                             
                             // Copy results to output array, mapping chunk indices to original row indices
-                            // Parallelize outer loop
-                            #ifdef _OPENMP
-                            #pragma omp parallel if (chunk_N > 100 && nthreads > 1)
-                            {
-                                #pragma omp for schedule(static)
-                                for (size_t i = 0; i < chunk_N; ++i) {
-                                    size_t orig_row = non_zero_row_indices[chunk_start + i];
-                                    for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                        for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                            size_t idx_buffer = i * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                            size_t idx_matlab = orig_row + icomp * N + ialm * N * ncomp;
-                                            alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                            alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                        }
-                                    }
-                                }
-                            }
-                            #else
-                            // Sequential version when OpenMP not available
+                            // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                             for (size_t i = 0; i < chunk_N; ++i) {
                                 size_t orig_row = non_zero_row_indices[chunk_start + i];
                                 for (size_t icomp = 0; icomp < ncomp; ++icomp) {
@@ -1326,7 +1136,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                     }
                                 }
                             }
-                            #endif
                             
                             // Move to next chunk
                             chunk_start = chunk_end;
@@ -1352,24 +1161,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                                            theta_view, nphi_view, phi0_view, ringstart_view,
                                            ringfactor_view, pixstride, nthreads, mode, theta_interpol);
                     
-                    // Copy from buffer to MATLAB (column-major) - parallelize outer loop
-                    #ifdef _OPENMP
-                    #pragma omp parallel if (N > 100 && nthreads > 1)
-                    {
-                        #pragma omp for schedule(static)
-                        for (size_t ibatch = 0; ibatch < N; ++ibatch) {
-                            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
-                                for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
-                                    size_t idx_buffer = ibatch * ncomp * nalm_dim + icomp * nalm_dim + ialm;
-                                    size_t idx_matlab = ibatch + icomp * N + ialm * N * ncomp;
-                                    alm_real[idx_matlab] = alm_buffer[idx_buffer].real();
-                                    alm_imag[idx_matlab] = alm_buffer[idx_buffer].imag();
-                                }
-                            }
-                        }
-                    }
-                    #else
-                    // Sequential version when OpenMP not available
+                    // Copy from buffer to MATLAB (column-major)
+                    // Note: DUCC's adjoint_synthesis_batch handles multithreading internally via nthreads parameter
                     for (size_t ibatch = 0; ibatch < N; ++ibatch) {
                         for (size_t icomp = 0; icomp < ncomp; ++icomp) {
                             for (size_t ialm = 0; ialm < nalm_dim; ++ialm) {
@@ -1380,7 +1173,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                             }
                         }
                     }
-                    #endif
                 }
             } else {
                 // Single mode: use regular function
