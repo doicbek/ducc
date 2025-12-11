@@ -675,7 +675,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
         f2(l) = sqrt(1./((l-1.)*l*(l+1.)*(l+2.)));
       }
 
-    ducc0::execDynamic(nm, nthreads, 1, [&](ducc0::Scheduler &sched)
+    execDynamic(nm, nthreads, 1, [&](Scheduler &sched)
       {
       Ylmgen gen(base);
       vmav<complex<double>,2> almtmp({nalm,lmax+2+spin}, UNINITIALIZED);
@@ -720,7 +720,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
     auto &rdata(rdata_normal);
     YlmBase base(lmax, mmax, spin);
   
-    ducc0::execDynamic(nm, nthreads, 1, [&](ducc0::Scheduler &sched)
+    execDynamic(nm, nthreads, 1, [&](Scheduler &sched)
       {
       Ylmgen gen(base);
       vmav<complex<double>,2> almtmp({lmax+2,nalm}, UNINITIALIZED);
@@ -871,7 +871,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
         f2(l) = sqrt(1./((l-1.)*l*(l+1.)*(l+2.)));
       }
 
-    ducc0::execDynamic(nm, nthreads, 1, [&](ducc0::Scheduler &sched)
+    execDynamic(nm, nthreads, 1, [&](Scheduler &sched)
       {
       Ylmgen gen(base);
       vmav<complex<double>,2> almtmp({2, lmax+2+spin}, UNINITIALIZED);
@@ -915,7 +915,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
     auto &rdata(rdata_normal);
     YlmBase base(lmax, mmax, spin);
 
-    ducc0::execDynamic(nm, nthreads, 1, [&](ducc0::Scheduler &sched)
+    execDynamic(nm, nthreads, 1, [&](Scheduler &sched)
       {
       Ylmgen gen(base);
       vmav<complex<double>,2> almtmp({lmax+2,nalm}, UNINITIALIZED);
