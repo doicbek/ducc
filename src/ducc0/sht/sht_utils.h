@@ -137,6 +137,113 @@ template<typename T> void resample_theta(const cmav<complex<T>,3> &legi, bool np
     });
   }
 
+// Batch version of resample_theta that processes all N maps together, reusing FFT plans and phase shifts
+template<typename T> void resample_theta_batch(
+  const cmav<complex<T>,4> &legi, // (N, ncomp, nrings_in, nm)
+  bool npi, bool spi,
+  const vmav<complex<T>,4> &lego, // (N, ncomp, nrings_out, nm)
+  bool npo, bool spo, size_t spin, size_t nthreads, bool adjoint)
+  {
+  constexpr size_t chunksize=64;
+  size_t N = legi.shape(0);
+  MR_assert(N==lego.shape(0), "batch dimension mismatch");
+  MR_assert(legi.shape(1)==lego.shape(1), "number of components mismatch");
+  auto nm = legi.shape(3);
+  MR_assert(lego.shape(3)==nm, "dimension mismatch");
+  if ((npi==npo)&&(spi==spo)&&(legi.shape(2)==lego.shape(2)))  // shortcut
+    {
+    mav_apply([](complex<T> &a, complex<T> b) {a=b;}, nthreads, lego, legi);
+    return;
+    }
+  size_t nrings_in = legi.shape(2);
+  size_t nfull_in = 2*nrings_in-npi-spi;
+  size_t nrings_out = lego.shape(2);
+  size_t nfull_out = 2*nrings_out-npo-spo;
+  auto dthi = T(2*pi/nfull_in);
+  auto dtho = T(2*pi/nfull_out);
+  auto shift = T(0.5*(dtho*(1-npo)-dthi*(1-npi)));
+  size_t nfull = max(nfull_in, nfull_out);
+  T fct = ((spin&1)==0) ? 1 : -1;
+  // Create FFT plans and phase shifts once, reuse for all N maps
+  pocketfft_c<T> plan_in(nfull_in), plan_out(nfull_out);
+  MultiExp<T,complex<T>> phase(adjoint ? -shift : shift, (shift==0.) ? 1 : nrings_in+2);
+  execDynamic((nm+1)/2, nthreads, chunksize, [&](Scheduler &sched)
+    {
+    // Allocate buffers once, reuse for all maps and components
+    vmav<complex<T>,1> tmp({nfull}, UNINITIALIZED);
+    vmav<complex<T>,1> buf({max(plan_in.bufsize(), plan_out.bufsize())}, UNINITIALIZED);
+    while (auto rng=sched.getNext())
+      {
+      // Process all N maps and all components together for this m-mode range
+      // Reuse FFT plans and phase shifts across all maps
+      for (size_t n=0; n<legi.shape(1); ++n)
+        {
+        for (size_t j=0; j+rng.lo<rng.hi; ++j)
+          {
+          // Process all N maps together for this component and m-mode
+          for (size_t ibatch = 0; ibatch < N; ++ibatch)
+            {
+            // Create 2D view [nrings, nm] from 4D array [N, ncomp, nrings, nm] by fixing N and ncomp
+            auto llegi(subarray<2>(legi, {{ibatch},{n},{},{2*rng.lo,MAXIDX}}));
+            auto llego(subarray<2>(lego, {{ibatch},{n},{},{2*rng.lo,MAXIDX}}));
+            {
+            // fill dark side
+            for (size_t i=0, im=nfull_in-1+npi; (i<nrings_in)&&(i<=im); ++i,--im)
+              {
+              complex<T> v1 = llegi(i,2*j);
+              complex<T> v2 = ((2*j+1)<llegi.shape(1)) ? llegi(i,2*j+1) : 0;
+              tmp(i) = v1 + v2;
+              if ((im<nfull_in) && (i!=im))
+                tmp(im) = fct * (v1-v2);
+              else
+                tmp(i) = (adjoint ? T(1) : T(0.5)) * (tmp(i) + fct*(v1-v2)); // sic!
+              }
+            plan_in.exec_copyback((Cmplx<T> *)tmp.data(), (Cmplx<T> *)buf.data(), T(1), !adjoint);
+            if (shift!=0)
+              for (size_t i=1, im=nfull_in-1; (i<nrings_in+1)&&(i<=im); ++i,--im)
+                {
+                if (i!=im)
+                  tmp(i) *= phase[i];
+                tmp(im) *= conj(phase[i]);
+                }
+
+            // zero padding/truncation
+            if (nfull_out>nfull_in) // pad
+              {
+              size_t dist = nfull_out-nfull_in;
+              size_t nmove = nfull_in/2;
+              for (size_t i=nfull_out-1; i>nfull_out-1-nmove; --i)
+                tmp(i) = tmp(i-dist);
+              for (size_t i=nfull_out-nmove-dist; i<nfull_out-nmove; ++i)
+                tmp(i) = 0;
+              }
+            if (nfull_out<nfull_in) // truncate
+              {
+              size_t dist = nfull_in-nfull_out;
+              size_t nmove = nfull_out/2;
+              for (size_t i=nfull_in-nmove; i<nfull_in; ++i)
+                tmp(i-dist) = tmp(i);
+              }
+            plan_out.exec_copyback((Cmplx<T> *)tmp.data(), (Cmplx<T> *)buf.data(), T(1), adjoint);
+            auto norm = T(1./(2*(adjoint ? nfull_out : nfull_in)));
+            for (size_t i=0; i<nrings_out; ++i)
+              {
+              size_t im = nfull_out-1+npo-i;
+              if (im==nfull_out) im=0;
+              T fct2 = (adjoint && (im==i)) ? T(0.5) : 1;
+              complex<T> v1 = fct2*tmp(i);
+              complex<T> v2 = fct2*fct*tmp(im);
+              llego(i,2*j) = norm * (v1 + v2);
+              if ((2*j+1)<llego.shape(1))
+                llego(i,2*j+1) = norm * (v1 - v2);
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
 // NOTE: legi and lego may overlap, with identical start address and strides 
 template<typename T> void resample_and_convolve_theta(const cmav<complex<T>,3> &legi, bool npi, bool spi,
   const vmav<complex<T>,3> &lego, bool npo, bool spo, const vector<double> &kernel, size_t spin, size_t nthreads, bool adjoint)

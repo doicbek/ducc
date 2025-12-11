@@ -39,6 +39,7 @@
 #include "ducc0/sht/sht_utils.h"
 #include "ducc0/infra/timers.h"
 #include "ducc0/sht/sht_inner_loop.h"
+#include "ducc0/infra/threading.h"
 
 namespace ducc0 {
 
@@ -1850,37 +1851,45 @@ template<typename T> void adjoint_synthesis_batch(
     auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
       max(theta.shape(0),ntheta_tmp),mstart.shape(0)}, PAGE_IN(nthreads)));
     map2leg_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
-    // Process all N maps in batch for resample_theta and leg2alm_internal
-    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+    // Process all N maps together using batch version of resample_theta
+    // This reuses FFT plans and phase shifts across all maps
+    // Create views for input and output: leg is [N, ncomp, nrings, nm]
+    // Input: [N, ncomp, theta.shape(0), nm], Output: [N, ncomp, ntheta_tmp, nm]
+    array<size_t,4> legi_shape_4d = {N, leg.shape(1), theta.shape(0), leg.shape(3)};
+    array<ptrdiff_t,4> legi_stride_4d = {leg.stride(0), leg.stride(1), leg.stride(2), leg.stride(3)};
+    cmav<complex<T>,4> legi_4d(leg.data(), legi_shape_4d, legi_stride_4d);
+    
+    // Create output leg array for resampled theta
+    auto leg_resampled(vmav<complex<T>,4>::build_noncritical({N, leg.shape(1), ntheta_tmp, leg.shape(3)}, PAGE_IN(nthreads)));
+    resample_theta_batch(legi_4d, npi, spi, leg_resampled, true, true, spin, nthreads, true);
+    
+    // Process all N maps together for leg2alm_internal
+    // Note: leg2alm_internal processes m-modes, and basis functions are computed per m-mode
+    // We still need to call it per-map, but we can parallelize across maps
+    execParallel(N, nthreads, [&](size_t ibatch, size_t)
       {
-      // Create 3D view of leg for input (theta.shape(0))
-      array<size_t,3> legi_shape_3d = {leg.shape(1), theta.shape(0), leg.shape(3)};
-      array<ptrdiff_t,3> legi_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
-      cmav<complex<T>,3> legi_2d(leg.data() + ibatch * leg.stride(0), legi_shape_3d, legi_stride_3d);
-      
-      // Create 3D view of leg for output (ntheta_tmp)
-      array<size_t,3> lego_shape_3d = {leg.shape(1), ntheta_tmp, leg.shape(3)};
-      array<ptrdiff_t,3> lego_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
-      vmav<complex<T>,3> lego_2d(leg.data() + ibatch * leg.stride(0), lego_shape_3d, lego_stride_3d);
-      
-      resample_theta(legi_2d, npi, spi, lego_2d, true, true, spin, nthreads, true);
-      
       // Create 2D view of alm for this batch item
       array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
       array<ptrdiff_t,2> alm_stride_2d = {alm.stride(1), alm.stride(2)};
       vmav<complex<T>,2> alm_2d(alm.data() + ibatch * alm.stride(0), alm_shape_2d, alm_stride_2d);
       
-      leg2alm_internal(alm_2d, lego_2d, spin, lmax, mval, mstart, lstride, theta_tmp,
-        nthreads, mode, theta_interpol, true);
-      }
+      // Create 3D view of leg for this batch item [ncomp, ntheta_tmp, nm]
+      array<size_t,3> leg_shape_3d = {leg_resampled.shape(1), leg_resampled.shape(2), leg_resampled.shape(3)};
+      array<ptrdiff_t,3> leg_stride_3d = {leg_resampled.stride(1), leg_resampled.stride(2), leg_resampled.stride(3)};
+      vmav<complex<T>,3> leg_2d(leg_resampled.data() + ibatch * leg_resampled.stride(0), leg_shape_3d, leg_stride_3d);
+      
+      leg2alm_internal(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta_tmp,
+        1, mode, theta_interpol, true);
+      });
     }
   else
     {
     auto leg(vmav<complex<T>,4>::build_noncritical({N, map.shape(1),
       theta.shape(0),mstart.shape(0)}, PAGE_IN(nthreads)));
     map2leg_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
-    // Process all N maps in batch for leg2alm_internal
-    for (size_t ibatch = 0; ibatch < N; ++ibatch)
+    // Process all N maps together for leg2alm_internal
+    // Parallelize across maps to utilize all available threads
+    execParallel(N, nthreads, [&](size_t ibatch, size_t)
       {
       // Create 2D view of alm for this batch item
       array<size_t,2> alm_shape_2d = {alm.shape(1), alm.shape(2)};
@@ -1892,9 +1901,10 @@ template<typename T> void adjoint_synthesis_batch(
       array<ptrdiff_t,3> leg_stride_3d = {leg.stride(1), leg.stride(2), leg.stride(3)};
       vmav<complex<T>,3> leg_2d(leg.data() + ibatch * leg.stride(0), leg_shape_3d, leg_stride_3d);
       
+      // Use 1 thread per map to avoid oversubscription when processing multiple maps in parallel
       leg2alm_internal(alm_2d, leg_2d, spin, lmax, mval, mstart, lstride, theta,
-        nthreads, mode, theta_interpol, true);
-      }
+        1, mode, theta_interpol, true);
+      });
     }
   }
 
