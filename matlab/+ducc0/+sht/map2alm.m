@@ -252,12 +252,68 @@ function alm = map2alm(map, spin, map_info, alm_info, varargin)
         phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
         'nthreads', nthreads, 'N_batch', N);
     
+    % For sparse inputs, identify non-zero maps to avoid synthesizing all maps
+    % This is critical for memory efficiency when N is large but most maps are zero
+    non_zero_map_indices = [];
+    if is_sparse_input && is_batch_mode && N > 1
+        % For sparse arrays in batch mode, map_weighted is [N, ncomp*npix]
+        % Each row represents one map, so find which rows have non-zero data
+        [row_indices, ~, ~] = find(map_weighted);
+        if ~isempty(row_indices)
+            % Get unique row indices (each row is one map)
+            non_zero_map_indices = unique(row_indices);
+            if length(non_zero_map_indices) == N
+                % All maps are non-zero, no need to filter
+                non_zero_map_indices = [];
+            end
+        end
+    end
+    
     % Iterative refinement using Jacobi iterations
     for i = 1:n_iter
         % Compute residual: map - synthesis(alm)
-        map_synth = ducc0.sht.synthesis(alm, lmax, spin, theta, nphi, ...
-            phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
-            'nthreads', nthreads, 'N_batch', N);
+        % For sparse inputs with many zero maps, only synthesize non-zero maps
+        if ~isempty(non_zero_map_indices)
+            % Only synthesize non-zero maps to save memory
+            % Extract alm for non-zero maps only (alm is [N, ncomp, nalm])
+            N_nonzero = length(non_zero_map_indices);
+            alm_nonzero = alm(non_zero_map_indices, :, :);
+            map_synth_nonzero = ducc0.sht.synthesis(alm_nonzero, lmax, spin, theta, nphi, ...
+                phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
+                'nthreads', nthreads);
+            
+            % Create sparse output with same structure as input
+            % map_synth should be [N, ncomp*npix] sparse to match map_weighted
+            map_synth = sparse(N, ncomp * npix);
+            
+            % map_synth_nonzero is [N_nonzero, ncomp, npix] (3D) or [ncomp, npix] (2D) if N_nonzero==1
+            % Reshape to [N_nonzero, ncomp*npix] and insert into sparse output
+            if N_nonzero == 1
+                % Single map case: map_synth_nonzero is [ncomp, npix]
+                map_synth_nonzero_2d = reshape(map_synth_nonzero, [1, ncomp * npix]);
+                map_synth(non_zero_map_indices(1), :) = sparse(map_synth_nonzero_2d);
+            else
+                % Multiple maps: map_synth_nonzero is [N_nonzero, ncomp, npix]
+                map_synth_nonzero_2d = reshape(map_synth_nonzero, [N_nonzero, ncomp * npix]);
+                % Insert each non-zero synthesized map into sparse output
+                for j = 1:N_nonzero
+                    map_idx = non_zero_map_indices(j);
+                    map_synth(map_idx, :) = sparse(map_synth_nonzero_2d(j, :));
+                end
+            end
+        else
+            % Synthesize all maps (dense input or all maps are non-zero)
+            map_synth = ducc0.sht.synthesis(alm, lmax, spin, theta, nphi, ...
+                phi0, ringstart, 'mmax', mmax, 'mstart', mstart, ...
+                'nthreads', nthreads);
+            
+            % If input was sparse, convert output to sparse format [N, ncomp*npix]
+            if is_sparse_input && is_batch_mode
+                % map_synth is [N, ncomp, npix] (3D), reshape to [N, ncomp*npix] (2D sparse)
+                [N_synth, ncomp_synth, npix_synth] = size(map_synth);
+                map_synth = sparse(reshape(map_synth, [N_synth, ncomp_synth * npix_synth]));
+            end
+        end
         
         % Compute difference (preserves sparsity if map_weighted is sparse)
         dmap = map_weighted - map_synth;
