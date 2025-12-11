@@ -634,7 +634,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
         subarray<3>(leg,{{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical({leg.shape(0), ntheta_tmp, leg.shape(2)},PAGE_IN(nthreads));
       alm2leg(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode);
-      resample_leg_CC_to_irregular(leg_tmp, leg, theta, spin, mval, nthreads);
+      ducc0::detail_sht::resample_leg_CC_to_irregular(leg_tmp, leg, theta, spin, mval, nthreads);
       return;
       } 
     }
@@ -837,7 +837,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
         subarray<3>(leg, {{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical
           ({leg.shape(0), ntheta_tmp, leg.shape(2)}, PAGE_IN(nthreads));
-      resample_leg_irregular_to_CC(leg, leg_tmp, theta, spin, mval, nthreads);
+      ducc0::detail_sht::resample_leg_irregular_to_CC(leg, leg_tmp, theta, spin, mval, nthreads);
       leg2alm_internal(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode, false, true);
       return;
       }
