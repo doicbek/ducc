@@ -241,6 +241,7 @@ template<typename T> void resample_theta_batch(
           }
         }
       }
+      }
     });
   }
 

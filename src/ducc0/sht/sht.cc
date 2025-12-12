@@ -275,7 +275,7 @@ void get_gridweights(const string &type, const vmav<double,1> &wgt)
   size_t nrings=wgt.shape(0);
   if (type=="GL") // Gauss-Legendre
     {
-    ducc0::GL_Integrator integ(nrings);
+    detail_gl_integrator::GL_Integrator integ(nrings);
     auto xwgt = integ.weights();
     for (size_t m=0; m<nrings; ++m)
       wgt(m) = 2*pi*xwgt[m];
@@ -607,7 +607,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
     MR_assert(leg.shape(0)==ncomp, "incorrect number of Legendre components");
     }
 
-  if (even_odd_m(mval))
+  if (ducc0::detail_sht::even_odd_m(mval))
     {
     bool npi, spi;
     size_t ntheta_tmp;
@@ -620,7 +620,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
         subarray<3>(leg,{{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical({leg.shape(0), ntheta_tmp, leg.shape(2)},PAGE_IN(nthreads));
       alm2leg(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode);
-      resample_theta(leg_tmp, true, true, leg, npi, spi, spin, nthreads, false);
+      ducc0::detail_sht::resample_theta(leg_tmp, true, true, leg, npi, spi, spin, nthreads, false);
       return;
       }
   
@@ -634,7 +634,7 @@ template<typename T> void alm2leg(  // associated Legendre transform
         subarray<3>(leg,{{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical({leg.shape(0), ntheta_tmp, leg.shape(2)},PAGE_IN(nthreads));
       alm2leg(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode);
-      ducc0::detail_sht::resample_leg_CC_to_irregular(leg_tmp, leg, theta, spin, mval, nthreads);
+      resample_leg_CC_to_irregular(leg_tmp, leg, theta, spin, mval, nthreads);
       return;
       } 
     }
@@ -809,7 +809,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
     MR_assert(leg.shape(0)==ncomp, "incorrect number of Legendre components");
     }
 
-  if (even_odd_m(mval))
+  if (ducc0::detail_sht::even_odd_m(mval))
     {
     bool npi, spi;
     size_t ntheta_tmp;
@@ -822,7 +822,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
         subarray<3>(leg, {{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical
           ({leg.shape(0), ntheta_tmp, leg.shape(2)}, PAGE_IN(nthreads));
-      resample_theta(leg, npi, spi, leg_tmp, true, true, spin, nthreads, true);
+      ducc0::detail_sht::resample_theta(leg, npi, spi, leg_tmp, true, true, spin, nthreads, true);
       leg2alm_internal(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode, false, true);
       return;
       }
@@ -837,7 +837,7 @@ template<typename T> void leg2alm_internal(  // associated Legendre transform
         subarray<3>(leg, {{},{0,ntheta_tmp},{}}) :
         vmav<complex<T>,3>::build_noncritical
           ({leg.shape(0), ntheta_tmp, leg.shape(2)}, PAGE_IN(nthreads));
-      ducc0::detail_sht::resample_leg_irregular_to_CC(leg, leg_tmp, theta, spin, mval, nthreads);
+      resample_leg_irregular_to_CC(leg, leg_tmp, theta, spin, mval, nthreads);
       leg2alm_internal(alm, leg_tmp, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads, mode, false, true);
       return;
       }
@@ -1631,7 +1631,7 @@ template<typename T> void synthesis_batch(
       
       alm2leg(alm_2d, legi_2d, spin, lmax, mval, mstart, lstride, theta_tmp, nthreads,
         mode, theta_interpol);
-      resample_theta(legi_2d, true, true, lego_2d, npi, spi, spin, nthreads, false);
+      ducc0::detail_sht::resample_theta(legi_2d, true, true, lego_2d, npi, spi, spin, nthreads, false);
       }
     leg2map_batch(map, leg, nphi, phi0, ringstart, ringfactor, pixstride, nthreads);
     }
@@ -1665,7 +1665,7 @@ void get_ringtheta_2d(const string &type, const vmav<double, 1> &theta)
 
   if (type=="GL") // Gauss-Legendre
     {
-    ducc0::GL_Integrator integ(nrings);
+    detail_gl_integrator::GL_Integrator integ(nrings);
     auto th = integ.thetas();
     for (size_t m=0; m<nrings; ++m)
       theta(m) = th[nrings-1-m];
