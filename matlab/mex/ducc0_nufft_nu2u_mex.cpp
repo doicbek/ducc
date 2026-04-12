@@ -185,15 +185,90 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         mxArray *grid_arr = mxCreateNumericArray(grid_ndim, grid_dims, mxDOUBLE_CLASS, mxCOMPLEX);
         delete[] grid_dims;
         
-        // Process: convert MATLAB arrays to DUCC format and call nu2u
-        // This is a simplified implementation - full implementation would handle
-        // array conversion properly
-        
-        // For now, return a placeholder
-        // Full implementation requires proper array conversion and NUFFT setup
-        mexErrMsgIdAndTxt("DUCC0:NUFFT:NU2U:NotImplemented", 
-            "NUFFT nu2u MEX function is not yet fully implemented. Complex array conversion required.");
-        
+        // Convert coord from MATLAB column-major to DUCC row-major
+        vector<double> coord_buffer(npoints * ndim);
+        const double *coord_data = mxGetPr(coord_arr);
+        for (size_t ipoint = 0; ipoint < npoints; ++ipoint) {
+            for (size_t idim = 0; idim < ndim; ++idim) {
+                coord_buffer[ipoint * ndim + idim] = coord_data[ipoint + idim * npoints];
+            }
+        }
+        array<size_t,2> coord_shape = {npoints, ndim};
+        cmav<double,2> coord_view(coord_buffer.data(), coord_shape);
+
+        // Compute grid shape vector and total element count
+        size_t grid_nelem = 1;
+        vector<size_t> grid_shape_vec(ndim);
+        for (size_t i = 0; i < ndim; ++i) {
+            grid_shape_vec[i] = gridshape[i];
+            grid_nelem *= gridshape[i];
+        }
+
+        if (ncomp == 1) {
+            // Single-component: copy points and call nu2u
+            const double *p_real = mxGetPr(points_arr);
+            const double *p_imag = mxGetPi(points_arr);
+            vector<complex<double>> points_buffer(npoints);
+            for (size_t i = 0; i < npoints; ++i) {
+                points_buffer[i] = complex<double>(p_real[i], p_imag ? p_imag[i] : 0.0);
+            }
+            array<size_t,1> pts_shape = {npoints};
+            cmav<complex<double>,1> points_view(points_buffer.data(), pts_shape);
+
+            vector<complex<double>> grid_buffer(grid_nelem, {0.0, 0.0});
+            vfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec);
+
+            nu2u<double, double, double, double, double>(
+                coord_view, points_view, forward, epsilon, nthreads,
+                grid_view, verbosity, sigma_min, sigma_max, periodicity, fft_order);
+
+            copyBufferToMatlab<complex<double>>(grid_buffer.data(), grid_arr, grid_shape_vec);
+
+        } else {
+            // Multi-component: reuse Nufft object across components
+            Nufft<double, double, double> nufft(true, npoints, grid_shape_vec,
+                epsilon, nthreads, sigma_min, sigma_max, periodicity, fft_order);
+
+            const double *p_real = mxGetPr(points_arr);
+            const double *p_imag = mxGetPi(points_arr);
+            double *g_real = mxGetPr(grid_arr);
+            double *g_imag = mxGetPi(grid_arr);
+
+            // Temporary single-component MATLAB array for column-major conversion
+            mwSize temp_dims[3];
+            for (size_t i = 0; i < ndim; ++i) temp_dims[i] = gridshape[ndim - 1 - i];
+            mxArray *temp_arr = mxCreateNumericArray(ndim, temp_dims, mxDOUBLE_CLASS, mxCOMPLEX);
+
+            for (size_t icomp = 0; icomp < ncomp; ++icomp) {
+                // points layout in MATLAB: [ncomp, npoints] column-major
+                vector<complex<double>> points_buffer(npoints);
+                for (size_t i = 0; i < npoints; ++i) {
+                    size_t idx = icomp + i * ncomp;
+                    points_buffer[i] = complex<double>(p_real[idx], p_imag ? p_imag[idx] : 0.0);
+                }
+                array<size_t,1> pts_shape = {npoints};
+                cmav<complex<double>,1> points_view(points_buffer.data(), pts_shape);
+
+                vector<complex<double>> grid_buffer(grid_nelem, {0.0, 0.0});
+                vfmav<complex<double>> grid_view(grid_buffer.data(), grid_shape_vec);
+                nufft.nu2u(forward, verbosity, coord_view, points_view, grid_view);
+
+                // Convert row-major grid_buffer → column-major temp_arr
+                copyBufferToMatlab<complex<double>>(grid_buffer.data(), temp_arr, grid_shape_vec);
+
+                // Interleave this component into the output array
+                // grid_arr layout: [ncomp, g_{ndim-1}, ..., g_0] column-major
+                // element [icomp, flat_j] → linear index icomp + flat_j * ncomp
+                const double *t_real = mxGetPr(temp_arr);
+                const double *t_imag = mxGetPi(temp_arr);
+                for (size_t i = 0; i < grid_nelem; ++i) {
+                    g_real[icomp + i * ncomp] = t_real[i];
+                    g_imag[icomp + i * ncomp] = t_imag[i];
+                }
+            }
+            mxDestroyArray(temp_arr);
+        }
+
         plhs[0] = grid_arr;
         
     } catch (const exception &e) {

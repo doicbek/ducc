@@ -79,22 +79,21 @@ See `mex/INSTALL.md` for detailed manual build instructions.
 
 ### Setting MATLAB Path
 
-After building, add the MEX directory to your MATLAB path:
+The easiest method is to run the setup script:
 
 ```matlab
-% Add MEX directory
-addpath('/path/to/ducc/matlab/mex/build');
-
-% Add MATLAB wrapper directory
-addpath('/path/to/ducc/matlab');
+run('/path/to/ducc/matlab/setup_ducc0.m')
 ```
 
-Or add permanently to your `startup.m`:
+`setup_ducc0.m` automatically locates the `matlab/mex/build/` directory and
+adds both paths.  For a permanent setup, add the line above to your
+`~/Documents/MATLAB/startup.m`.
+
+To set paths manually:
 
 ```matlab
-% Add to startup.m
-addpath('/path/to/ducc/matlab/mex/build');
-addpath('/path/to/ducc/matlab');
+addpath('/path/to/ducc/matlab/mex/build');   % MEX binaries
+addpath('/path/to/ducc/matlab');              % +ducc0 package
 ```
 
 ### Configuring MEX Compiler

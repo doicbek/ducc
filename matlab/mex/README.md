@@ -131,57 +131,54 @@ MATLAB uses 1-based indexing and column-major axis ordering. DUCC uses 0-based i
 
 ## Available Functions
 
-### FFT Module
+### FFT Module (8 functions)
 
 - `ducc0_fft_c2c_mex`: Complex-to-complex FFT
 - `ducc0_fft_r2c_mex`: Real-to-complex FFT
 - `ducc0_fft_c2r_mex`: Complex-to-real FFT
+- `ducc0_fft_r2r_fftpack_mex`: Real-to-real FFT (FFTPACK convention)
+- `ducc0_fft_dct_mex`: Discrete Cosine Transform
+- `ducc0_fft_dst_mex`: Discrete Sine Transform
+- `ducc0_fft_hartley_mex`: Hartley transform
 - `ducc0_fft_good_size_mex`: Find efficient FFT size
 
-### SHT Module
+### SHT Module (8 functions)
 
-- `ducc0_sht_synthesis_2d_mex`: Spherical harmonic synthesis (alm2map) for 2D grids
-- `ducc0_sht_analysis_2d_mex`: Spherical harmonic analysis (map2alm) for 2D grids
+- `ducc0_sht_synthesis_2d_mex`: alm → map on regular 2D grids
+- `ducc0_sht_analysis_2d_mex`: map → alm on regular 2D grids
+- `ducc0_sht_adjoint_synthesis_2d_mex`: Adjoint of synthesis_2d
+- `ducc0_sht_adjoint_analysis_2d_mex`: Adjoint of analysis_2d
+- `ducc0_sht_synthesis_mex`: alm → map on arbitrary rings
+- `ducc0_sht_adjoint_synthesis_mex`: map → alm on arbitrary rings (supports sparse arrays and batch mode)
+- `ducc0_sht_rotate_alm_mex`: Rotate spherical harmonic coefficients
 - `ducc0_sht_get_gridweights_mex`: Get quadrature weights for grid geometries
-- `ducc0_sht_rotate_alm_mex`: Rotate spherical harmonic coefficients (Coming Soon)
-- `ducc0_sht_adjoint_synthesis_2d_mex`: Adjoint synthesis (Coming Soon)
-- `ducc0_sht_adjoint_analysis_2d_mex`: Adjoint analysis (Coming Soon)
 
-### NUFFT Module (Coming Soon)
+### NUFFT Module (2 functions)
 
-- `ducc0_nufft_nu2u_mex`: Non-uniform to uniform FFT
-- `ducc0_nufft_u2nu_mex`: Uniform to non-uniform FFT
+- `ducc0_nufft_nu2u_mex`: Non-uniform to uniform FFT (type 1)
+- `ducc0_nufft_u2nu_mex`: Uniform to non-uniform FFT (type 2)
 
-### HEALPix Module (Coming Soon)
+### HEALPix Module (2 functions)
 
-- `ducc0_healpix_nside2npix_mex`: Convert nside to number of pixels
-- `ducc0_healpix_npix2nside_mex`: Convert number of pixels to nside
 - `ducc0_healpix_ang2pix_mex`: Convert angles to pixel indices
 - `ducc0_healpix_pix2ang_mex`: Convert pixel indices to angles
 
-### Misc Module (Coming Soon)
+### Misc Module (1 function)
 
-- `ducc0_misc_vdot_mex`: Scalar product
-- `ducc0_misc_l2error_mex`: L2 error
+- `ducc0_misc_vdot_mex`: Complex inner product of two arrays
 
 ## Current Status
 
+All 21 MEX functions are implemented:
+
 - [x] MEX infrastructure (array conversion utilities)
-- [x] FFT c2c MEX function
-- [x] FFT good_size MEX function
-- [ ] FFT r2c MEX function
-- [ ] FFT c2r MEX function
-- [x] SHT synthesis_2d MEX function
-- [x] SHT analysis_2d MEX function
-- [x] SHT get_gridweights MEX function
-- [ ] SHT rotate_alm MEX function
-- [ ] SHT adjoint_synthesis_2d MEX function
-- [ ] SHT adjoint_analysis_2d MEX function
-- [ ] NUFFT MEX functions
-- [ ] HEALPix MEX functions
-- [ ] Misc MEX functions
-- [ ] Complete error handling
-- [ ] Performance optimizations
+- [x] FFT: c2c, r2c, c2r, r2r_fftpack, dct, dst, hartley, good_size
+- [x] SHT: synthesis_2d, analysis_2d, adjoint_synthesis_2d, adjoint_analysis_2d
+- [x] SHT: synthesis, adjoint_synthesis (arbitrary rings, supports sparse + batch)
+- [x] SHT: rotate_alm, get_gridweights
+- [x] NUFFT: nu2u, u2nu
+- [x] HEALPix: ang2pix, pix2ang
+- [x] Misc: vdot
 
 ## Notes
 
